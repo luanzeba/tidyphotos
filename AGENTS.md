@@ -24,7 +24,7 @@ TidyPhotos is a self-hosted photo management application designed as an Apple Ph
 ## File Structure
 
 ```
-/Users/vieira/projects/tidyphotos/
+tidyphotos/
 ├── build.zig                 # Zig build configuration
 ├── src/
 │   ├── main.zig             # HTTP server, routing, photo discovery
