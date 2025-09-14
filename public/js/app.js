@@ -231,7 +231,7 @@ function photoApp() {
                     
                 case 'f':
                 case 'F':
-                    if (this.selectedPhotoId !== null) {
+                    if (this.selectedPhotoId !== null && !this.fullScreenMode) {
                         event.preventDefault();
                         this.toggleFavorite(this.selectedPhotoId);
                     }
