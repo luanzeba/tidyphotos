@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TidyPhotos</title>
+    <link rel="stylesheet" href="/styles/main.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        console.log('🔧 TidyPhotos: Script loading...');
+        document.addEventListener('alpine:init', () => {
+            console.log('🏔️ Alpine.js: Initialized');
+        });
+        window.addEventListener('load', () => {
+            console.log('🌍 TidyPhotos: Page loaded, Alpine available:', !!window.Alpine);
+        });
+    </script>
+</head>
+<body>
+    <div x-data="photoApp()" x-init="init()" class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>TidyPhotos</h1>
+            <div class="controls">
+                <input type="search" x-model="searchQuery" placeholder="Search photos..." class="search">
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <!-- Left Sidebar Timeline -->
+            <aside class="timeline-sidebar">
+                <div class="timeline-section">
+                    <h3>Years</h3>
+                    <div class="timeline-buttons">
+                        <template x-for="year in years" :key="year">
+                            <button 
+                                @click="selectYear(year)" 
+                                :class="{ active: selectedYear === year }"
+                                x-text="year"
+                                class="timeline-btn">
+                            </button>
+                        </template>
+                    </div>
+                </div>
+                
+                <div class="timeline-section" x-show="selectedYear">
+                    <h3>Months</h3>
+                    <div class="timeline-buttons">
+                        <template x-for="month in months" :key="month.number">
+                            <button 
+                                @click="selectMonth(month.number)" 
+                                :class="{ active: selectedMonth === month.number }"
+                                x-text="month.name"
+                                class="timeline-btn">
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="timeline-section" x-show="selectedYear || selectedMonth">
+                    <button @click="clearFilters()" class="clear-filters">
+                        Clear Filters
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Photo Grid -->
+            <main class="photo-grid" @keydown.window="handleKeyboard">
+            <template x-for="photo in filteredPhotos" :key="photo.id">
+                <div 
+                    class="photo-item" 
+                    :class="{ selected: photo.id === selectedPhotoId }"
+                    @click="selectPhoto(photo.id)"
+                    @dblclick="openFullScreen(photo.id)"
+                    tabindex="0">
+                    <img :src="photo.thumbnail" :alt="photo.name" loading="lazy">
+                    <div class="photo-overlay">
+                        <span class="photo-date" x-text="formatDate(photo.date)"></span>
+                        <button class="favorite" :class="{ active: photo.favorite }" @click.stop="toggleFavorite(photo.id)">
+                            ★
+                        </button>
+                    </div>
+                </div>
+            </template>
+            
+            <!-- Loading State -->
+            <div x-show="loading" class="loading">
+                Loading photos...
+            </div>
+        </main>
+        
+        <!-- Mobile Bottom Timeline Slider -->
+        <div class="mobile-timeline-slider">
+            <button 
+                @click="setMobileView('years')" 
+                :class="{ active: mobileTimelineView === 'years' }"
+                class="mobile-timeline-btn">
+                Years
+            </button>
+            <button 
+                @click="setMobileView('months')" 
+                :class="{ active: mobileTimelineView === 'months' }"
+                class="mobile-timeline-btn">
+                Months
+            </button>
+            <button 
+                @click="setMobileView('all')" 
+                :class="{ active: mobileTimelineView === 'all' }"
+                class="mobile-timeline-btn">
+                All
+            </button>
+        </div>
+        </div>
+        
+        <!-- Full-Screen Photo Viewer -->
+        <div x-show="fullScreenMode" class="photo-viewer-overlay" @keydown.window="handleFullScreenKeyboard">
+            <div class="photo-viewer-header">
+                <div class="photo-viewer-info">
+                    <h3 x-text="currentPhoto?.name"></h3>
+                    <span x-text="`${currentPhotoIndex + 1} of ${filteredPhotos.length}`"></span>
+                </div>
+                <button @click="closeFullScreen" class="close-btn" title="Close (Esc or Q)">
+                    ✕
+                </button>
+            </div>
+            
+            <div class="photo-viewer-content">
+                <button 
+                    @click="previousPhoto" 
+                    class="nav-btn nav-btn-left"
+                    :class="{ disabled: currentPhotoIndex === 0 }"
+                    title="Previous (Left Arrow)">
+                    ‹
+                </button>
+                
+                <div class="photo-viewer-main">
+                    <img 
+                        :src="currentPhoto?.thumbnail" 
+                        :alt="currentPhoto?.name"
+                        class="full-screen-photo"
+                        @click="closeFullScreen">
+                </div>
+                
+                <button 
+                    @click="nextPhoto" 
+                    class="nav-btn nav-btn-right"
+                    :class="{ disabled: currentPhotoIndex === filteredPhotos.length - 1 }"
+                    title="Next (Right Arrow)">
+                    ›
+                </button>
+            </div>
+            
+            <div class="photo-viewer-footer">
+                <button 
+                    @click="toggleFullScreenFavorite" 
+                    class="favorite-btn"
+                    :class="{ active: currentPhoto?.favorite }"
+                    title="Favorite (F)">
+                    ★
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
