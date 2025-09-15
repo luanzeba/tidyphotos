@@ -72,6 +72,7 @@
                     :class="{ selected: photo.id === selectedPhotoId }"
                     @click="selectPhoto(photo.id)"
                     @dblclick="openFullScreen(photo.id)"
+                    @focus="selectPhoto(photo.id)"
                     tabindex="0">
                     <img :src="photo.thumbnail" :alt="photo.name" loading="lazy">
                     <button class="favorite-heart" :class="{ active: photo.favorite }" @click.stop="toggleFavorite(photo.id)">
@@ -167,6 +168,14 @@
         </div>
     </div>
 
-    <script src="/js/app.js"></script>
+    <!-- Core classes -->
+    <script src="/js/photo-manager.js"></script>
+    <script src="/js/timeline-manager.js"></script>
+    <script src="/js/router.js"></script>
+    <script src="/js/fullscreen-viewer.js"></script>
+    <script src="/js/keyboard-handler.js"></script>
+    
+    <!-- Main app -->
+    <script src="/js/tidyphotos-app.js"></script>
 </body>
 </html>

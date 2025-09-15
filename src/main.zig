@@ -98,7 +98,8 @@ const Server = struct {
             defer self.allocator.free(photo_path);
             try self.serveFile(socket, photo_path, "image/jpeg", is_head_request);
         } else {
-            try self.send404(socket);
+            // For all other routes (like /gallery/all/photo/1), serve index.html for client-side routing
+            try self.serveFile(socket, "public/index.html", "text/html", is_head_request);
         }
     }
 

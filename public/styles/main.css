@@ -140,6 +140,7 @@ body {
     flex: 1;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-auto-rows: minmax(200px, auto);
     gap: 1rem;
     padding: 2rem;
     align-content: start;
@@ -151,7 +152,8 @@ body {
 
 .photo-item {
     position: relative;
-    aspect-ratio: 1;
+    width: 100%;
+    height: 200px;
     border-radius: 0.5rem;
     overflow: hidden;
     cursor: pointer;
@@ -320,9 +322,14 @@ button:focus {
     
     .photo-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); /* Smaller thumbnails */
+        grid-auto-rows: minmax(120px, auto);
         gap: 0.25rem;
         padding: 1rem;
         padding-bottom: 80px; /* Extra space for slider */
+    }
+    
+    .photo-item {
+        height: 120px;
     }
     
     .search {
