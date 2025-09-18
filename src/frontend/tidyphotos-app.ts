@@ -169,8 +169,8 @@ export class TidyPhotosApp {
     }
 
     // Photo methods
-    toggleFavorite(photoId: number): void {
-        this.photoManager.toggleFavorite(photoId);
+    async toggleFavorite(photoId: number): Promise<void> {
+        await this.photoManager.toggleFavorite(photoId);
     }
 
     formatDate(dateString: string): string {
@@ -311,8 +311,8 @@ window.photoApp = function(): any {
             this.updateData();
         },
 
-        toggleFavorite(photoId: number) {
-            appInstance!.toggleFavorite(photoId);
+        async toggleFavorite(photoId: number) {
+            await appInstance!.toggleFavorite(photoId);
             this.updateData();
         },
 
@@ -336,8 +336,8 @@ window.photoApp = function(): any {
             this.updateData();
         },
 
-        toggleFullScreenFavorite() {
-            appInstance!.toggleFullScreenFavorite();
+        async toggleFullScreenFavorite() {
+            await appInstance!.toggleFullScreenFavorite();
             this.updateData();
         },
 

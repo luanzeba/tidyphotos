@@ -80,9 +80,9 @@ export class FullscreenViewer {
         }
     }
 
-    toggleFavorite(): void {
+    async toggleFavorite(): Promise<void> {
         if (this.currentPhoto) {
-            this.app.getPhotoManager().toggleFavorite(this.currentPhoto.id);
+            await this.app.getPhotoManager().toggleFavorite(this.currentPhoto.id);
         }
     }
 

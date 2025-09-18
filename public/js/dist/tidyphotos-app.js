@@ -127,8 +127,8 @@ export class TidyPhotosApp {
         this.timelineManager.setMobileView(view);
     }
     // Photo methods
-    toggleFavorite(photoId) {
-        this.photoManager.toggleFavorite(photoId);
+    async toggleFavorite(photoId) {
+        await this.photoManager.toggleFavorite(photoId);
     }
     formatDate(dateString) {
         return this.photoManager.formatDate(dateString);
@@ -241,8 +241,8 @@ window.photoApp = function () {
                 appInstance.setMobileView(view);
                 this.updateData();
             },
-            toggleFavorite(photoId) {
-                appInstance.toggleFavorite(photoId);
+            async toggleFavorite(photoId) {
+                await appInstance.toggleFavorite(photoId);
                 this.updateData();
             },
             openFullScreen(photoId) {
@@ -261,8 +261,8 @@ window.photoApp = function () {
                 appInstance.previousPhoto();
                 this.updateData();
             },
-            toggleFullScreenFavorite() {
-                appInstance.toggleFullScreenFavorite();
+            async toggleFullScreenFavorite() {
+                await appInstance.toggleFullScreenFavorite();
                 this.updateData();
             },
             handleKeyboard(event) {

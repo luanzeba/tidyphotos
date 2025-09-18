@@ -49,12 +49,36 @@ export class PhotoManager {
         }
         return photos;
     }
-    toggleFavorite(photoId) {
+    async toggleFavorite(photoId) {
         const photo = this.photos.find((p) => p.id === photoId);
         console.log("⭐ TidyPhotos: Toggling favorite for photo ID", photoId, "favorite:", photo?.favorite);
         if (photo) {
-            photo.favorite = !photo.favorite;
-            // TODO: API call to update favorite status
+            const originalState = photo.favorite;
+            const newFavoriteState = !originalState;
+            // Optimistic update: Update UI immediately
+            photo.favorite = newFavoriteState;
+            console.log(`🚀 Optimistic update: ${newFavoriteState ? 'adding' : 'removing'} favorite for ${photo.name}`);
+            try {
+                // Call API to persist the change
+                const method = newFavoriteState ? 'PUT' : 'DELETE';
+                const response = await fetch(`/api/photos/${encodeURIComponent(photo.name)}/favorite`, {
+                    method: method,
+                });
+                if (response.ok) {
+                    // API call succeeded - optimistic update was correct
+                    console.log(`✅ Successfully ${newFavoriteState ? 'added' : 'removed'} favorite for ${photo.name}`);
+                }
+                else {
+                    // API call failed - revert the optimistic update
+                    photo.favorite = originalState;
+                    console.error(`❌ Failed to ${newFavoriteState ? 'add' : 'remove'} favorite, reverting UI:`, response.status, response.statusText);
+                }
+            }
+            catch (error) {
+                // Network error - revert the optimistic update
+                photo.favorite = originalState;
+                console.error('❌ Network error while updating favorite, reverting UI:', error);
+            }
         }
     }
     formatDate(dateString) {

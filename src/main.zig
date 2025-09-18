@@ -90,7 +90,7 @@ const Server = struct {
             defer self.allocator.free(file_path);
             try self.serveFile(socket, file_path, "text/css", is_head_request);
         } else if (std.mem.startsWith(u8, path, "/api/")) {
-            try self.handleApi(socket, path);
+            try self.handleApi(socket, method, path);
         } else if (std.mem.startsWith(u8, path, "/photos/")) {
             // Serve photos from test_photos directory  
             const photo_filename = path[8..]; // Remove "/photos/" prefix
@@ -141,18 +141,51 @@ const Server = struct {
         }
     }
 
-    fn handleApi(self: *Self, socket: std.posix.fd_t, path: []const u8) !void {
+    fn handleApi(self: *Self, socket: std.posix.fd_t, method: []const u8, path: []const u8) !void {
         if (std.mem.eql(u8, path, "/api/photos")) {
-            // Discover photos on-demand with pagination (default: first 20)
-            const json_response = try self.discoverPhotosJson(0, 20);
-            defer self.allocator.free(json_response);
-            
-            var response_buffer: [1024]u8 = undefined;
-            const response = try std.fmt.bufPrint(response_buffer[0..],
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
-                .{json_response.len});
-            _ = try std.posix.write(socket, response);
-            _ = try std.posix.write(socket, json_response);
+            if (std.mem.eql(u8, method, "GET")) {
+                // Discover photos on-demand with pagination (default: first 20)
+                const json_response = try self.discoverPhotosJson(0, 20);
+                defer self.allocator.free(json_response);
+
+                var response_buffer: [1024]u8 = undefined;
+                const response = try std.fmt.bufPrint(response_buffer[0..],
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                    .{json_response.len});
+                _ = try std.posix.write(socket, response);
+                _ = try std.posix.write(socket, json_response);
+            } else {
+                try self.sendMethodNotAllowed(socket);
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/photos/") and std.mem.endsWith(u8, path, "/favorite")) {
+            // Extract photo name: /api/photos/{photo_name}/favorite
+            const prefix_len = "/api/photos/".len;
+            const suffix_len = "/favorite".len;
+            if (path.len > prefix_len + suffix_len) {
+                const photo_name = path[prefix_len..path.len - suffix_len];
+
+                if (std.mem.eql(u8, method, "PUT")) {
+                    // Add to favorites
+                    self.addPhotoToFavorites(photo_name) catch |err| {
+                        print("❌ Failed to add '{s}' to favorites: {}\n", .{ photo_name, err });
+                        try self.sendInternalServerError(socket);
+                        return;
+                    };
+                    try self.sendSuccessResponse(socket, "Photo added to favorites");
+                } else if (std.mem.eql(u8, method, "DELETE")) {
+                    // Remove from favorites
+                    self.removePhotoFromFavorites(photo_name) catch |err| {
+                        print("❌ Failed to remove '{s}' from favorites: {}\n", .{ photo_name, err });
+                        try self.sendInternalServerError(socket);
+                        return;
+                    };
+                    try self.sendSuccessResponse(socket, "Photo removed from favorites");
+                } else {
+                    try self.sendMethodNotAllowed(socket);
+                }
+            } else {
+                try self.send404(socket);
+            }
         } else {
             try self.send404(socket);
         }
@@ -188,14 +221,17 @@ const Server = struct {
             
             if (found > 0) try json.append(',');
             
+            // Check if photo is favorited (symlink exists)
+            const is_favorite = self.isPhotoFavorited(entry.name) catch false;
+
             // Generate JSON for this photo (no storing in memory!)
             const photo_json = try std.fmt.allocPrint(self.allocator,
                 \\{{"id":{}, "name":"{s}", "thumbnail":"/photos/{s}", "date":"2024-05-22T12:00:00Z", "favorite":{s}, "tags":["real"]}}
-            , .{ 
+            , .{
                 count + 1,
                 entry.name,
                 entry.name,
-                if ((count + 1) % 5 == 0) "true" else "false"
+                if (is_favorite) "true" else "false"
             });
             defer self.allocator.free(photo_json);
             try json.appendSlice(photo_json);
@@ -209,12 +245,89 @@ const Server = struct {
         return json.toOwnedSlice();
     }
 
+    // Symlink-based favorites management
+    fn isPhotoFavorited(self: *Self, photo_name: []const u8) !bool {
+        var favorites_path_buf: [512]u8 = undefined;
+        const favorites_path = try std.fmt.bufPrint(favorites_path_buf[0..], "{s}/favorites/{s}", .{ self.photos_dir, photo_name });
+
+        // Check if symlink exists
+        std.fs.cwd().access(favorites_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return false,
+            else => return err,
+        };
+        return true;
+    }
+
+    fn addPhotoToFavorites(self: *Self, photo_name: []const u8) !void {
+        // Ensure favorites directory exists
+        var favorites_dir_path_buf: [512]u8 = undefined;
+        const favorites_dir_path = try std.fmt.bufPrint(favorites_dir_path_buf[0..], "{s}/favorites", .{self.photos_dir});
+        std.fs.cwd().makeDir(favorites_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
+        // Create symlink: favorites/photo.jpg -> ../photo.jpg
+        var source_path_buf: [512]u8 = undefined;
+        const source_path = try std.fmt.bufPrint(source_path_buf[0..], "../{s}", .{photo_name});
+
+        var target_path_buf: [512]u8 = undefined;
+        const target_path = try std.fmt.bufPrint(target_path_buf[0..], "{s}/favorites/{s}", .{ self.photos_dir, photo_name });
+
+        // Remove existing symlink if it exists
+        std.fs.cwd().deleteFile(target_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        // Create new symlink
+        try std.fs.cwd().symLink(source_path, target_path, .{});
+        print("⭐ Added '{s}' to favorites\n", .{photo_name});
+    }
+
+    fn removePhotoFromFavorites(self: *Self, photo_name: []const u8) !void {
+        var favorites_path_buf: [512]u8 = undefined;
+        const favorites_path = try std.fmt.bufPrint(favorites_path_buf[0..], "{s}/favorites/{s}", .{ self.photos_dir, photo_name });
+
+        std.fs.cwd().deleteFile(favorites_path) catch |err| switch (err) {
+            error.FileNotFound => return, // Already not a favorite
+            else => return err,
+        };
+        print("💔 Removed '{s}' from favorites\n", .{photo_name});
+    }
+
     fn send404(_: *Self, socket: std.posix.fd_t) !void {
         const not_found = "404 Not Found";
         var response_buffer: [256]u8 = undefined;
         const response = try std.fmt.bufPrint(response_buffer[0..],
             "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{s}",
             .{ not_found.len, not_found });
+        _ = try std.posix.write(socket, response);
+    }
+
+    fn sendMethodNotAllowed(_: *Self, socket: std.posix.fd_t) !void {
+        const message = "Method Not Allowed";
+        var response_buffer: [256]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{s}",
+            .{ message.len, message });
+        _ = try std.posix.write(socket, response);
+    }
+
+    fn sendInternalServerError(_: *Self, socket: std.posix.fd_t) !void {
+        const message = "Internal Server Error";
+        var response_buffer: [256]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{s}",
+            .{ message.len, message });
+        _ = try std.posix.write(socket, response);
+    }
+
+    fn sendSuccessResponse(_: *Self, socket: std.posix.fd_t, message: []const u8) !void {
+        var response_buffer: [512]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{s}",
+            .{ message.len, message });
         _ = try std.posix.write(socket, response);
     }
 };

@@ -69,9 +69,9 @@ export class FullscreenViewer {
             this.app.getRouter().updateUrl(true, this.app.getCurrentGallery(), this.currentPhoto);
         }
     }
-    toggleFavorite() {
+    async toggleFavorite() {
         if (this.currentPhoto) {
-            this.app.getPhotoManager().toggleFavorite(this.currentPhoto.id);
+            await this.app.getPhotoManager().toggleFavorite(this.currentPhoto.id);
         }
     }
     handleKeyboard(event) {
