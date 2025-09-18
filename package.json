@@ -1,0 +1,26 @@
+{
+  "name": "tidyphotos",
+  "version": "0.1.0",
+  "description": "Self-hosted photo management application - Apple Photos alternative",
+  "type": "module",
+  "scripts": {
+    "build": "zig build && npm run build:frontend",
+    "build:frontend": "tsc",
+    "watch:frontend": "tsc --watch",
+    "dev": "npm run build && ./zig-out/bin/tidyphotos",
+    "start": "./zig-out/bin/tidyphotos"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "photo-management",
+    "self-hosted",
+    "zig",
+    "alpine-js",
+    "typescript"
+  ],
+  "author": "Luan Vieira <luanv@me.com>",
+  "license": "MIT"
+}
+

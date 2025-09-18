@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TidyPhotos</title>
     <link rel="stylesheet" href="/styles/main.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
     <script>
         console.log('🔧 TidyPhotos: Script loading...');
         document.addEventListener('alpine:init', () => {
@@ -15,6 +15,12 @@
             console.log('🌍 TidyPhotos: Page loaded, Alpine available:', !!window.Alpine);
         });
     </script>
+
+    <!-- Load main app first -->
+    <script type="module" src="/js/dist/tidyphotos-app.js"></script>
+
+    <!-- Load Alpine.js after -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
     <div x-data="photoApp()" x-init="init()" class="app">
@@ -167,15 +173,5 @@
             
         </div>
     </div>
-
-    <!-- Core classes -->
-    <script src="/js/photo-manager.js"></script>
-    <script src="/js/timeline-manager.js"></script>
-    <script src="/js/router.js"></script>
-    <script src="/js/fullscreen-viewer.js"></script>
-    <script src="/js/keyboard-handler.js"></script>
-    
-    <!-- Main app -->
-    <script src="/js/tidyphotos-app.js"></script>
 </body>
 </html>
