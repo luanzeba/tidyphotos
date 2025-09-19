@@ -37,7 +37,9 @@ const Server = struct {
         try std.posix.bind(socket, &address.any, address.getOsSockLen());
         try std.posix.listen(socket, 128);
         
-        print("TidyPhotos server listening on http://127.0.0.1:8080\n", .{});
+        print("TidyPhotos server listening on:\n", .{});
+        print("  Local:   http://127.0.0.1:8080\n", .{});
+        print("  Network: http://192.168.1.201:8080 (accessible from other devices)\n", .{});
 
         while (true) {
             var client_addr: net.Address = undefined;
@@ -339,6 +341,6 @@ pub fn main() !void {
 
     var server = try Server.init(allocator);
 
-    const address = net.Address.parseIp("127.0.0.1", 8080) catch unreachable;
+    const address = net.Address.parseIp("0.0.0.0", 8080) catch unreachable;
     try server.listen(address);
 }
