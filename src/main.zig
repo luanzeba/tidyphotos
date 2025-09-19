@@ -5,6 +5,69 @@ const PhotoImporter = @import("import/photo_importer.zig").PhotoImporter;
 const PhotoInfo = @import("import/photo_importer.zig").PhotoInfo;
 const ThumbnailGenerator = @import("thumbnails/thumbnail_generator.zig").ThumbnailGenerator;
 
+// Helper function to check if file is a supported image format
+fn isImageFile(filename: []const u8) bool {
+    const extensions = [_][]const u8{ ".jpg", ".jpeg", ".png", ".heic", ".JPG", ".JPEG", ".PNG", ".HEIC" };
+    for (extensions) |ext| {
+        if (std.mem.endsWith(u8, filename, ext)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Extract photo date from EXIF metadata using exiftool
+fn extractPhotoDate(allocator: std.mem.Allocator, photo_path: []const u8) ![]const u8 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    // Prepare exiftool command
+    const cmd = [_][]const u8{ "exiftool", "-DateTimeOriginal", "-CreateDate", "-json", photo_path };
+
+    // Execute exiftool
+    var result = std.process.Child.run(.{
+        .allocator = arena_allocator,
+        .argv = &cmd,
+    }) catch |err| {
+        print("⚠️ Failed to run exiftool for {s}: {}\n", .{photo_path, err});
+        return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
+    };
+
+    if (result.term != .Exited or result.term.Exited != 0) {
+        print("⚠️ exiftool failed for {s}\n", .{photo_path});
+        return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
+    }
+
+    // Parse JSON response to find DateTimeOriginal
+    if (std.mem.indexOf(u8, result.stdout, "\"DateTimeOriginal\"")) |start_idx| {
+        // Find the colon and first quote after it: "DateTimeOriginal": "2025:05:22 11:12:29"
+        if (std.mem.indexOf(u8, result.stdout[start_idx..], ":")) |colon_idx| {
+            const after_colon = start_idx + colon_idx + 1;
+            if (std.mem.indexOf(u8, result.stdout[after_colon..], "\"")) |quote1| {
+                const value_start = after_colon + quote1 + 1;
+                if (std.mem.indexOf(u8, result.stdout[value_start..], "\"")) |quote2| {
+                    const date_str = result.stdout[value_start..value_start + quote2];
+                    // Convert "2025:05:22 11:12:29" to "2025-05-22T11:12:29Z"
+                    if (date_str.len >= 19) {
+                        const iso_date = try std.fmt.allocPrint(allocator, "{s}-{s}-{s}T{s}Z", .{
+                            date_str[0..4],  // year
+                            date_str[5..7],  // month
+                            date_str[8..10], // day
+                            date_str[11..19] // time
+                        });
+                        print("📅 Extracted date for {s}: {s}\n", .{photo_path, iso_date});
+                        return iso_date;
+                    }
+                }
+            }
+        }
+    }
+
+    print("⚠️ No DateTimeOriginal found for {s}, using fallback\n", .{photo_path});
+    return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
+}
+
 const Server = struct {
     allocator: std.mem.Allocator,
     photo_importer: PhotoImporter,
@@ -210,7 +273,7 @@ const Server = struct {
         
         while (try iterator.next()) |entry| {
             if (entry.kind != .file) continue;
-            if (!std.mem.endsWith(u8, entry.name, ".jpeg") and !std.mem.endsWith(u8, entry.name, ".jpg")) continue;
+            if (!isImageFile(entry.name)) continue;
             
             // Skip photos before offset
             if (count < offset) {
@@ -226,13 +289,20 @@ const Server = struct {
             // Check if photo is favorited (symlink exists)
             const is_favorite = self.isPhotoFavorited(entry.name) catch false;
 
+            // Extract real photo date from EXIF metadata
+            var photo_path_buf: [512]u8 = undefined;
+            const photo_path = try std.fmt.bufPrint(photo_path_buf[0..], "{s}/{s}", .{ self.photos_dir, entry.name });
+            const photo_date = try extractPhotoDate(self.allocator, photo_path);
+            defer self.allocator.free(photo_date);
+
             // Generate JSON for this photo (no storing in memory!)
             const photo_json = try std.fmt.allocPrint(self.allocator,
-                \\{{"id":{}, "name":"{s}", "thumbnail":"/photos/{s}", "date":"2024-05-22T12:00:00Z", "favorite":{s}, "tags":["real"]}}
+                \\{{"id":{}, "name":"{s}", "thumbnail":"/photos/{s}", "date":"{s}", "favorite":{s}, "tags":["real"]}}
             , .{
                 count + 1,
                 entry.name,
                 entry.name,
+                photo_date,
                 if (is_favorite) "true" else "false"
             });
             defer self.allocator.free(photo_json);

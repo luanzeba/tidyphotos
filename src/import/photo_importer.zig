@@ -2,6 +2,17 @@ const std = @import("std");
 const fs = std.fs;
 const print = std.debug.print;
 
+// Helper function to check if file is a supported image format
+fn isImageFile(filename: []const u8) bool {
+    const extensions = [_][]const u8{ ".jpg", ".jpeg", ".png", ".heic", ".JPG", ".JPEG", ".PNG", ".HEIC" };
+    for (extensions) |ext| {
+        if (std.mem.endsWith(u8, filename, ext)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub const PhotoImporter = struct {
     allocator: std.mem.Allocator,
     photos_dir: []const u8,
@@ -42,8 +53,8 @@ pub const PhotoImporter = struct {
         while (try iterator.next()) |entry| {
             if (entry.kind != .file) continue;
             
-            // Only process JPEG files
-            if (!std.mem.endsWith(u8, entry.name, ".jpeg") and !std.mem.endsWith(u8, entry.name, ".jpg")) {
+            // Only process supported image files
+            if (!isImageFile(entry.name)) {
                 continue;
             }
             
