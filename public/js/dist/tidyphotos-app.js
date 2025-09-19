@@ -199,8 +199,15 @@ window.photoApp = function () {
             years: [],
             months: [],
             filteredPhotos: [],
+            thumbnailSize: 200,
             // Initialization
             async init() {
+                // Load thumbnail size from localStorage
+                const savedSize = localStorage.getItem('tidyphotos-thumbnail-size');
+                if (savedSize) {
+                    this.thumbnailSize = parseInt(savedSize);
+                    document.documentElement.style.setProperty('--thumbnail-size', savedSize + 'px');
+                }
                 await appInstance.init();
                 this.updateData();
             },
@@ -272,6 +279,13 @@ window.photoApp = function () {
             handleFullScreenKeyboard(event) {
                 appInstance.handleFullScreenKeyboard(event);
                 this.updateData();
+            },
+            updateThumbnailSize(size) {
+                this.thumbnailSize = parseInt(size);
+                // Update CSS custom property
+                document.documentElement.style.setProperty('--thumbnail-size', size + 'px');
+                // Save to localStorage for persistence
+                localStorage.setItem('tidyphotos-thumbnail-size', size);
             }
         };
     }

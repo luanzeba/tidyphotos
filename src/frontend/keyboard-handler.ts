@@ -8,6 +8,36 @@ export class KeyboardHandler {
     this.app = app;
   }
 
+  private calculateGridColumns(): number {
+    // Get the actual grid container
+    const gridElement = document.querySelector('.photo-grid') as HTMLElement;
+    if (!gridElement) return 1;
+
+    // Get computed styles to find the actual grid layout
+    const computedStyles = window.getComputedStyle(gridElement);
+    const gridTemplateColumns = computedStyles.gridTemplateColumns;
+
+    // Count the number of columns by splitting the grid-template-columns value
+    // Example: "200px 200px 200px" -> 3 columns
+    // Example: "repeat(5, 200px)" is handled by browser as actual values
+    if (gridTemplateColumns && gridTemplateColumns !== 'none') {
+      const columns = gridTemplateColumns.split(' ').length;
+      return Math.max(1, columns);
+    }
+
+    // Fallback: calculate based on container width and current thumbnail size
+    const containerWidth = gridElement.clientWidth;
+    const gap = parseInt(computedStyles.gap) || 16; // 1rem default
+
+    // Get the actual thumbnail size from CSS custom property
+    const thumbnailSizeProperty = computedStyles.getPropertyValue('--thumbnail-size') || '200px';
+    const minColumnWidth = parseInt(thumbnailSizeProperty) || 200;
+
+    const availableWidth = containerWidth - (gap * 2); // subtract padding
+    const approxColumns = Math.floor(availableWidth / (minColumnWidth + gap));
+    return Math.max(1, approxColumns);
+  }
+
   handleGalleryKeyboard(event: KeyboardEvent): void {
     const photos = this.app.getFilteredPhotos();
     if (photos.length === 0) return;
@@ -52,19 +82,19 @@ export class KeyboardHandler {
 
       case "ArrowDown":
         event.preventDefault();
-        // Navigate down a row (approximate)
-        const gridCols = Math.floor(window.innerWidth / 220); // approximate
+        // Navigate down a row using actual grid layout
+        const gridColsDown = this.calculateGridColumns();
         const nextRowIndex = Math.min(
           photos.length - 1,
-          currentIndex + gridCols,
+          currentIndex + gridColsDown,
         );
         this.app.selectPhoto(photos[nextRowIndex].id);
         break;
 
       case "ArrowUp":
         event.preventDefault();
-        // Navigate up a row
-        const gridColsUp = Math.floor(window.innerWidth / 220);
+        // Navigate up a row using actual grid layout
+        const gridColsUp = this.calculateGridColumns();
         const prevRowIndex = Math.max(0, currentIndex - gridColsUp);
         this.app.selectPhoto(photos[prevRowIndex].id);
         break;
