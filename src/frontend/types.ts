@@ -40,6 +40,7 @@ export type MobileTimelineView = 'years' | 'months' | 'all';
 export interface RouteState {
     gallery: string;
     photoId?: number;
+    view?: string;
 }
 
 // Alpine.js compatibility types

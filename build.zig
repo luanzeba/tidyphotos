@@ -11,6 +11,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Add httpz dependency
+    const httpz = b.dependency("httpz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("httpz", httpz.module("httpz"));
+
     // Add SQLite dependency
     exe.linkLibC();
     exe.linkSystemLibrary("sqlite3");

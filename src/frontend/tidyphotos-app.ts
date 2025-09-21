@@ -1,13 +1,15 @@
-import { Photo, Month, MobileTimelineView } from './types.js';
+import { Photo, Month, MobileTimelineView, Person } from './types.js';
 import { PhotoManager } from './photo-manager.js';
 import { TimelineManager } from './timeline-manager.js';
 import { Router } from './router.js';
 import { FullscreenViewer } from './fullscreen-viewer.js';
 import { KeyboardHandler } from './keyboard-handler.js';
+import { PeopleManager } from './people-manager.js';
 
 export class TidyPhotosApp {
     private photoManager: PhotoManager;
     private timelineManager: TimelineManager;
+    private peopleManager: PeopleManager;
     private viewer: FullscreenViewer;
     private keyboardHandler: KeyboardHandler;
     private router: Router;
@@ -16,11 +18,13 @@ export class TidyPhotosApp {
     private _searchQuery: string = '';
     private selectedPhotoId: number | null = null;
     private currentGallery: string = 'all';
+    private _currentView: 'photos' | 'people' = 'photos';
 
     constructor() {
         // Initialize managers
         this.photoManager = new PhotoManager();
         this.timelineManager = new TimelineManager();
+        this.peopleManager = new PeopleManager();
         this.viewer = new FullscreenViewer(this);
         this.keyboardHandler = new KeyboardHandler(this);
         this.router = new Router(this);
@@ -33,6 +37,10 @@ export class TidyPhotosApp {
 
     getTimelineManager(): TimelineManager {
         return this.timelineManager;
+    }
+
+    getPeopleManager(): PeopleManager {
+        return this.peopleManager;
     }
 
     getViewer(): FullscreenViewer {
@@ -61,6 +69,10 @@ export class TidyPhotosApp {
         return this.currentGallery;
     }
 
+    getCurrentView(): 'photos' | 'people' {
+        return this._currentView;
+    }
+
     getFilteredPhotos(): Photo[] {
         return this.timelineManager.filterPhotos(this.photoManager.allPhotos, this._searchQuery);
     }
@@ -83,6 +95,10 @@ export class TidyPhotosApp {
 
     setSearchQuery(query: string): void {
         this._searchQuery = query;
+    }
+
+    setCurrentView(view: 'photos' | 'people'): void {
+        this._currentView = view;
     }
 
     // Computed properties (getters) for Alpine.js compatibility
@@ -138,10 +154,21 @@ export class TidyPhotosApp {
         this.setSearchQuery(value);
     }
 
+    get currentView(): 'photos' | 'people' {
+        return this._currentView;
+    }
+
+    get people(): Person[] {
+        return this.peopleManager.people;
+    }
+
     // Initialization
     async init(): Promise<void> {
         console.log('🚀 TidyPhotos: Initializing...');
-        await this.photoManager.loadPhotos();
+        await Promise.all([
+            this.photoManager.loadPhotos(),
+            this.peopleManager.loadPeople()
+        ]);
         this.router.handleInitialRoute();
         console.log('✅ TidyPhotos: Initialization complete');
     }
@@ -211,6 +238,19 @@ export class TidyPhotosApp {
         this.viewer.handleKeyboard(event);
     }
 
+    // People management methods
+    async addPerson(name: string): Promise<Person | null> {
+        return await this.peopleManager.addPerson(name);
+    }
+
+    async updatePerson(id: number, name: string): Promise<boolean> {
+        return await this.peopleManager.updatePerson(id, name);
+    }
+
+    async deletePerson(id: number): Promise<boolean> {
+        return await this.peopleManager.deletePerson(id);
+    }
+
     // Alpine.js compatibility methods
     scrollSelectedIntoView(): void {
         // Use setTimeout to simulate $nextTick
@@ -262,6 +302,11 @@ window.photoApp = function(): any {
         months: [],
         filteredPhotos: [],
         thumbnailSize: 200,
+        currentView: 'photos',
+        people: [],
+        showAddPersonModal: false,
+        showEditPersonModal: false,
+        personForm: { id: null, name: '' },
 
         // Initialization
         async init() {
@@ -291,6 +336,8 @@ window.photoApp = function(): any {
             this.years = appInstance!.years;
             this.months = appInstance!.months;
             this.filteredPhotos = appInstance!.filteredPhotos.map(photo => ({ ...photo }));
+            this.currentView = appInstance!.currentView;
+            this.people = appInstance!.people.map(person => ({ ...person }));
         },
 
         // Methods (bound to the instance)
@@ -365,6 +412,61 @@ window.photoApp = function(): any {
             document.documentElement.style.setProperty('--thumbnail-size', size + 'px');
             // Save to localStorage for persistence
             localStorage.setItem('tidyphotos-thumbnail-size', size);
+        },
+
+        // View management
+        setCurrentView(view: string) {
+            appInstance!.setCurrentView(view as any);
+            this.updateData();
+            // Update URL when view changes
+            appInstance!.getRouter().updateUrl(
+                appInstance!.fullScreenMode,
+                appInstance!.getCurrentGallery(),
+                appInstance!.currentPhoto
+            );
+        },
+
+        // People management
+        async addPerson() {
+            if (this.personForm.name.trim()) {
+                const result = await appInstance!.addPerson(this.personForm.name.trim());
+                if (result) {
+                    this.closePersonModal();
+                    this.updateData();
+                }
+            }
+        },
+
+        async updatePerson() {
+            if (this.personForm.id && this.personForm.name.trim()) {
+                const result = await appInstance!.updatePerson(this.personForm.id, this.personForm.name.trim());
+                if (result) {
+                    this.closePersonModal();
+                    this.updateData();
+                }
+            }
+        },
+
+        editPerson(person: any) {
+            this.personForm.id = person.id;
+            this.personForm.name = person.name;
+            this.showEditPersonModal = true;
+        },
+
+        async deletePerson(person: any) {
+            if (confirm(`Are you sure you want to delete "${person.name}"? This will remove all associated photo tags.`)) {
+                const result = await appInstance!.deletePerson(person.id);
+                if (result) {
+                    this.updateData();
+                }
+            }
+        },
+
+        closePersonModal() {
+            this.showAddPersonModal = false;
+            this.showEditPersonModal = false;
+            this.personForm.id = null;
+            this.personForm.name = '';
         }
         };
     }

@@ -17,7 +17,8 @@ export class PhotoManager {
     try {
       const response = await fetch("/api/photos");
       console.log("📡 TidyPhotos: API response status:", response.status);
-      this.photos = (await response.json()) as Photo[];
+      const data = await response.json();
+      this.photos = data.photos as Photo[];
       console.log(
         "📷 TidyPhotos: Loaded",
         this.photos.length,

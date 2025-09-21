@@ -14,7 +14,8 @@ export class PhotoManager {
         try {
             const response = await fetch("/api/photos");
             console.log("📡 TidyPhotos: API response status:", response.status);
-            this.photos = (await response.json());
+            const data = await response.json();
+            this.photos = data.photos;
             console.log("📷 TidyPhotos: Loaded", this.photos.length, "photos:", this.photos);
             // Mock data for now
             if (this.photos.length === 0) {

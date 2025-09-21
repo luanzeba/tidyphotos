@@ -31,15 +31,22 @@ export class Router {
             // Route: /gallery/{gallery}/photo/{photoId}
             const [, gallery, photoIdStr] = galleryPhotoMatch;
             const photoId = parseInt(photoIdStr, 10);
+            this.app.setCurrentView('photos');
             this.app.setCurrentGallery(gallery);
             this.app.openFullScreenFromRoute(photoId);
         } else if (galleryMatch) {
             // Route: /gallery/{gallery}
             const [, gallery] = galleryMatch;
+            this.app.setCurrentView('photos');
             this.app.setCurrentGallery(gallery);
+            this.app.closeFullScreen();
+        } else if (path === '/people') {
+            // Route: /people
+            this.app.setCurrentView('people');
             this.app.closeFullScreen();
         } else if (path === '/') {
             // Route: / (default to 'all' gallery)
+            this.app.setCurrentView('photos');
             this.app.setCurrentGallery('all');
             this.app.closeFullScreen();
         } else {
@@ -49,9 +56,13 @@ export class Router {
     }
 
     updateUrl(fullScreenMode: boolean, currentGallery: string, currentPhoto: Photo | null): void {
+        const currentView = this.app.getCurrentView();
         let newPath: string;
-        
-        if (fullScreenMode && currentPhoto) {
+
+        if (currentView === 'people') {
+            // People view
+            newPath = '/people';
+        } else if (fullScreenMode && currentPhoto) {
             // Full-screen photo view
             newPath = `/gallery/${currentGallery}/photo/${currentPhoto.id}`;
         } else {
@@ -60,9 +71,10 @@ export class Router {
         }
 
         if (window.location.pathname !== newPath) {
-            const state: RouteState = { 
-                gallery: currentGallery, 
-                photoId: currentPhoto?.id 
+            const state: RouteState = {
+                gallery: currentGallery,
+                photoId: currentPhoto?.id,
+                view: currentView
             };
             window.history.pushState(state, '', newPath);
             console.log('🔗 TidyPhotos: Updated URL:', newPath);
@@ -70,7 +82,14 @@ export class Router {
     }
 
     navigateToGallery(): void {
+        this.app.setCurrentView('photos');
         this.app.setFullScreenMode(false);
+        this.updateUrl(false, this.app.getCurrentGallery(), null);
+    }
+
+    navigateToPeople(): void {
+        this.app.setCurrentView('people');
+        this.app.closeFullScreen();
         this.updateUrl(false, this.app.getCurrentGallery(), null);
     }
 }

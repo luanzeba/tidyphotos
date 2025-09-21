@@ -30,9 +30,43 @@ body {
     z-index: 100;
 }
 
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+}
+
 .header h1 {
     font-size: 1.5rem;
     font-weight: 600;
+}
+
+/* Navigation Tabs */
+.nav-tabs {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.nav-tab {
+    background: transparent;
+    border: none;
+    color: #888;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    transition: all 0.2s ease;
+}
+
+.nav-tab:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-tab.active {
+    color: #007AFF;
+    background: rgba(0, 122, 255, 0.1);
 }
 
 .controls {
@@ -107,6 +141,15 @@ body {
 .main-layout {
     display: flex;
     height: calc(100vh - 80px); /* Subtract header height */
+}
+
+.photos-view {
+    display: flex;
+    width: 100%;
+}
+
+.people-view {
+    width: 100%;
 }
 
 /* Timeline Sidebar */
@@ -608,5 +651,359 @@ button:focus {
     .full-screen-photo {
         max-width: calc(100vw - 4rem); /* Smaller nav buttons on mobile */
         max-height: calc(100vh - 6rem); /* Smaller header/footer on mobile */
+    }
+}
+
+/* People Management */
+.people-main {
+    flex: 1;
+    padding: 2rem;
+    overflow-y: auto;
+    background: #000;
+}
+
+.people-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.people-header h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+}
+
+.add-person-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #007AFF;
+    border: none;
+    border-radius: 0.5rem;
+    color: #fff;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+.add-person-btn:hover {
+    background: #0056CC;
+}
+
+.add-person-btn svg {
+    pointer-events: none;
+}
+
+/* People Grid */
+.people-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.person-card {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 0.75rem;
+    padding: 1.5rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.person-card:hover {
+    background: #1a1a1a;
+    border-color: #444;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+.person-avatar {
+    width: 4rem;
+    height: 4rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #007AFF, #0056CC);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.person-info h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 0.25rem 0;
+}
+
+.person-info span {
+    font-size: 0.9rem;
+    color: #888;
+}
+
+.person-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.person-card:hover .person-actions {
+    opacity: 1;
+}
+
+.icon-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 0.375rem;
+    color: #fff;
+    cursor: pointer;
+    padding: 0.5rem;
+    transition: all 0.2s ease;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.icon-btn.delete-btn:hover {
+    background: rgba(255, 107, 107, 0.2);
+    color: #FF6B6B;
+}
+
+.icon-btn svg {
+    pointer-events: none;
+}
+
+/* Empty State */
+.empty-state {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+    text-align: center;
+    color: #888;
+}
+
+.empty-icon {
+    margin-bottom: 1.5rem;
+    opacity: 0.6;
+}
+
+.empty-state h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0 0 0.5rem 0;
+}
+
+.empty-state p {
+    font-size: 0.95rem;
+    margin: 0 0 1.5rem 0;
+    max-width: 400px;
+    line-height: 1.5;
+}
+
+.add-person-empty-btn {
+    background: #007AFF;
+    border: none;
+    border-radius: 0.5rem;
+    color: #fff;
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+.add-person-empty-btn:hover {
+    background: #0056CC;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(5px);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+
+.modal {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 0.75rem;
+    width: 100%;
+    max-width: 400px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem 1.5rem 0 1.5rem;
+    border-bottom: 1px solid #333;
+    margin-bottom: 1.5rem;
+}
+
+.modal-header h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+    margin: 0;
+}
+
+.modal-body {
+    padding: 0 1.5rem 1.5rem 1.5rem;
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #ccc;
+    margin-bottom: 0.5rem;
+}
+
+.form-group input {
+    width: 100%;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: border-color 0.2s ease;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #007AFF;
+    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid #444;
+    border-radius: 0.5rem;
+    color: #ccc;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: #555;
+    color: #fff;
+}
+
+.btn-primary {
+    background: #007AFF;
+    border: none;
+    border-radius: 0.5rem;
+    color: #fff;
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+}
+
+.btn-primary:hover {
+    background: #0056CC;
+}
+
+/* Responsive adjustments for people management */
+@media (max-width: 768px) {
+    .people-main {
+        padding: 1rem;
+    }
+
+    .people-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+    }
+
+    .people-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .person-card {
+        padding: 1rem;
+    }
+
+    .person-avatar {
+        width: 3rem;
+        height: 3rem;
+        font-size: 1.25rem;
+    }
+
+    .person-actions {
+        opacity: 1; /* Always show on mobile */
+    }
+
+    .modal {
+        margin: 1rem;
+        max-width: none;
+    }
+
+    .modal-overlay {
+        padding: 1rem;
+    }
+
+    .form-actions {
+        flex-direction: column;
+    }
+
+    .nav-tabs {
+        order: 2;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .header-left {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
     }
 }

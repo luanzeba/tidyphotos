@@ -1,0 +1,11 @@
+.{
+    .name = "tidyphotos",
+    .version = "0.1.0",
+    .dependencies = .{
+        .httpz = .{
+            .url = "https://github.com/karlseguin/http.zig/archive/zig-0.13.tar.gz",
+            .hash = "12203254adcaba63705ff7ecf1894a5a26d5a5a0a9cfecd01423775fa5566b625138",
+        },
+    },
+    .paths = .{""},
+}

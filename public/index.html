@@ -26,8 +26,24 @@
     <div x-data="photoApp()" x-init="init()" class="app">
         <!-- Header -->
         <header class="header">
-            <h1>TidyPhotos</h1>
-            <div class="controls">
+            <div class="header-left">
+                <h1>TidyPhotos</h1>
+                <nav class="nav-tabs">
+                    <button
+                        @click="setCurrentView('photos')"
+                        :class="{ active: currentView === 'photos' }"
+                        class="nav-tab">
+                        Photos
+                    </button>
+                    <button
+                        @click="setCurrentView('people')"
+                        :class="{ active: currentView === 'people' }"
+                        class="nav-tab">
+                        People
+                    </button>
+                </nav>
+            </div>
+            <div class="controls" x-show="currentView === 'photos'">
                 <div class="thumbnail-size-control">
                     <label for="thumbnail-size">Size:</label>
                     <input
@@ -46,8 +62,10 @@
         </header>
 
         <div class="main-layout">
-            <!-- Left Sidebar Timeline -->
-            <aside class="timeline-sidebar">
+            <!-- Photos View -->
+            <div x-show="currentView === 'photos'" class="photos-view">
+                <!-- Left Sidebar Timeline -->
+                <aside class="timeline-sidebar">
                 <div class="timeline-section">
                     <h3>Years</h3>
                     <div class="timeline-buttons">
@@ -129,8 +147,66 @@
                 All
             </button>
         </div>
+            </div>
+
+            <!-- People View -->
+            <div x-show="currentView === 'people'" class="people-view">
+                <!-- People Management Section -->
+                <main class="people-main">
+                    <div class="people-header">
+                        <h2>People</h2>
+                        <button @click="showAddPersonModal = true" class="add-person-btn">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L19 7V9L17 9V11L19 11V13L21 13V11L23 11V9M16 4C16 6.21 14.21 8 12 8C9.79 8 8 6.21 8 4C8 1.79 9.79 0 12 0C14.21 0 16 1.79 16 4ZM4 7V10H1V12H4V15H6V12H9V10H6V7H4Z"/>
+                            </svg>
+                            Add Person
+                        </button>
+                    </div>
+
+                    <!-- People List -->
+                    <div class="people-grid">
+                        <template x-for="person in people" :key="person.id">
+                            <div class="person-card">
+                                <div class="person-avatar">
+                                    <span x-text="person.name.charAt(0).toUpperCase()"></span>
+                                </div>
+                                <div class="person-info">
+                                    <h3 x-text="person.name"></h3>
+                                    <span x-text="`${person.photoCount || 0} photos`"></span>
+                                </div>
+                                <div class="person-actions">
+                                    <button @click="editPerson(person)" class="icon-btn" title="Edit">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                                        </svg>
+                                    </button>
+                                    <button @click="deletePerson(person)" class="icon-btn delete-btn" title="Delete">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Empty State -->
+                        <div x-show="people.length === 0" class="empty-state">
+                            <div class="empty-icon">
+                                <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
+                                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                                </svg>
+                            </div>
+                            <h3>No people added yet</h3>
+                            <p>Add people to organize photos by faces</p>
+                            <button @click="showAddPersonModal = true" class="add-person-empty-btn">
+                                Add Your First Person
+                            </button>
+                        </div>
+                    </div>
+                </main>
+            </div>
         </div>
-        
+
         <!-- Full-Screen Photo Viewer -->
         <div x-show="fullScreenMode" class="photo-viewer-overlay" @keydown.window="handleFullScreenKeyboard">
             <div class="photo-viewer-header">
@@ -183,7 +259,38 @@
                     </svg>
                 </button>
             </div>
-            
+
+        </div>
+
+        <!-- Add/Edit Person Modal -->
+        <div x-show="showAddPersonModal || showEditPersonModal" class="modal-overlay" @click.self="closePersonModal()">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 x-text="showAddPersonModal ? 'Add Person' : 'Edit Person'"></h3>
+                    <button @click="closePersonModal()" class="close-btn">✕</button>
+                </div>
+                <div class="modal-body">
+                    <form @submit.prevent="showAddPersonModal ? addPerson() : updatePerson()">
+                        <div class="form-group">
+                            <label for="person-name">Name</label>
+                            <input
+                                type="text"
+                                id="person-name"
+                                x-model="personForm.name"
+                                placeholder="Enter person's name"
+                                required>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" @click="closePersonModal()" class="btn-secondary">
+                                Cancel
+                            </button>
+                            <button type="submit" class="btn-primary">
+                                <span x-text="showAddPersonModal ? 'Add Person' : 'Update Person'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </body>

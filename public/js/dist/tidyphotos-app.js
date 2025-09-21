@@ -3,15 +3,18 @@ import { TimelineManager } from './timeline-manager.js';
 import { Router } from './router.js';
 import { FullscreenViewer } from './fullscreen-viewer.js';
 import { KeyboardHandler } from './keyboard-handler.js';
+import { PeopleManager } from './people-manager.js';
 export class TidyPhotosApp {
     constructor() {
         // App state
         this._searchQuery = '';
         this.selectedPhotoId = null;
         this.currentGallery = 'all';
+        this._currentView = 'photos';
         // Initialize managers
         this.photoManager = new PhotoManager();
         this.timelineManager = new TimelineManager();
+        this.peopleManager = new PeopleManager();
         this.viewer = new FullscreenViewer(this);
         this.keyboardHandler = new KeyboardHandler(this);
         this.router = new Router(this);
@@ -22,6 +25,9 @@ export class TidyPhotosApp {
     }
     getTimelineManager() {
         return this.timelineManager;
+    }
+    getPeopleManager() {
+        return this.peopleManager;
     }
     getViewer() {
         return this.viewer;
@@ -43,6 +49,9 @@ export class TidyPhotosApp {
     getCurrentGallery() {
         return this.currentGallery;
     }
+    getCurrentView() {
+        return this._currentView;
+    }
     getFilteredPhotos() {
         return this.timelineManager.filterPhotos(this.photoManager.allPhotos, this._searchQuery);
     }
@@ -61,6 +70,9 @@ export class TidyPhotosApp {
     }
     setSearchQuery(query) {
         this._searchQuery = query;
+    }
+    setCurrentView(view) {
+        this._currentView = view;
     }
     // Computed properties (getters) for Alpine.js compatibility
     get loading() {
@@ -102,10 +114,19 @@ export class TidyPhotosApp {
     set searchQuery(value) {
         this.setSearchQuery(value);
     }
+    get currentView() {
+        return this._currentView;
+    }
+    get people() {
+        return this.peopleManager.people;
+    }
     // Initialization
     async init() {
         console.log('🚀 TidyPhotos: Initializing...');
-        await this.photoManager.loadPhotos();
+        await Promise.all([
+            this.photoManager.loadPhotos(),
+            this.peopleManager.loadPeople()
+        ]);
         this.router.handleInitialRoute();
         console.log('✅ TidyPhotos: Initialization complete');
     }
@@ -159,6 +180,16 @@ export class TidyPhotosApp {
     handleFullScreenKeyboard(event) {
         this.viewer.handleKeyboard(event);
     }
+    // People management methods
+    async addPerson(name) {
+        return await this.peopleManager.addPerson(name);
+    }
+    async updatePerson(id, name) {
+        return await this.peopleManager.updatePerson(id, name);
+    }
+    async deletePerson(id) {
+        return await this.peopleManager.deletePerson(id);
+    }
     // Alpine.js compatibility methods
     scrollSelectedIntoView() {
         // Use setTimeout to simulate $nextTick
@@ -200,6 +231,11 @@ window.photoApp = function () {
             months: [],
             filteredPhotos: [],
             thumbnailSize: 200,
+            currentView: 'photos',
+            people: [],
+            showAddPersonModal: false,
+            showEditPersonModal: false,
+            personForm: { id: null, name: '' },
             // Initialization
             async init() {
                 // Load thumbnail size from localStorage
@@ -226,6 +262,8 @@ window.photoApp = function () {
                 this.years = appInstance.years;
                 this.months = appInstance.months;
                 this.filteredPhotos = appInstance.filteredPhotos.map(photo => ({ ...photo }));
+                this.currentView = appInstance.currentView;
+                this.people = appInstance.people.map(person => ({ ...person }));
             },
             // Methods (bound to the instance)
             selectPhoto(photoId) {
@@ -286,6 +324,51 @@ window.photoApp = function () {
                 document.documentElement.style.setProperty('--thumbnail-size', size + 'px');
                 // Save to localStorage for persistence
                 localStorage.setItem('tidyphotos-thumbnail-size', size);
+            },
+            // View management
+            setCurrentView(view) {
+                appInstance.setCurrentView(view);
+                this.updateData();
+                // Update URL when view changes
+                appInstance.getRouter().updateUrl(appInstance.fullScreenMode, appInstance.getCurrentGallery(), appInstance.currentPhoto);
+            },
+            // People management
+            async addPerson() {
+                if (this.personForm.name.trim()) {
+                    const result = await appInstance.addPerson(this.personForm.name.trim());
+                    if (result) {
+                        this.closePersonModal();
+                        this.updateData();
+                    }
+                }
+            },
+            async updatePerson() {
+                if (this.personForm.id && this.personForm.name.trim()) {
+                    const result = await appInstance.updatePerson(this.personForm.id, this.personForm.name.trim());
+                    if (result) {
+                        this.closePersonModal();
+                        this.updateData();
+                    }
+                }
+            },
+            editPerson(person) {
+                this.personForm.id = person.id;
+                this.personForm.name = person.name;
+                this.showEditPersonModal = true;
+            },
+            async deletePerson(person) {
+                if (confirm(`Are you sure you want to delete "${person.name}"? This will remove all associated photo tags.`)) {
+                    const result = await appInstance.deletePerson(person.id);
+                    if (result) {
+                        this.updateData();
+                    }
+                }
+            },
+            closePersonModal() {
+                this.showAddPersonModal = false;
+                this.showEditPersonModal = false;
+                this.personForm.id = null;
+                this.personForm.name = '';
             }
         };
     }
