@@ -7,6 +7,27 @@ export interface Photo {
     date: string;
     favorite: boolean;
     tags?: string[];
+    people?: Person[];
+}
+
+export interface Person {
+    id: number;
+    name: string;
+    photoCount?: number;
+    lastSeen?: string;
+}
+
+export interface FaceDetection {
+    photoId: number;
+    personId?: number;
+    confidence: number;
+    boundingBox: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+    confirmed: boolean;
 }
 
 export interface Month {

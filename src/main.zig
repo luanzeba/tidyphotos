@@ -4,6 +4,8 @@ const print = std.debug.print;
 const PhotoImporter = @import("import/photo_importer.zig").PhotoImporter;
 const PhotoInfo = @import("import/photo_importer.zig").PhotoInfo;
 const ThumbnailGenerator = @import("thumbnails/thumbnail_generator.zig").ThumbnailGenerator;
+const Database = @import("models/database.zig").Database;
+const Person = @import("models/database.zig").Person;
 
 // Helper function to check if file is a supported image format
 fn isImageFile(filename: []const u8) bool {
@@ -73,6 +75,7 @@ const Server = struct {
     photo_importer: PhotoImporter,
     thumbnail_generator: ThumbnailGenerator,
     photos_dir: []const u8,
+    database: Database,
 
     const Self = @This();
 
@@ -81,14 +84,26 @@ const Server = struct {
         const photo_importer = PhotoImporter.init(allocator, "photos", true);
         const thumbnail_generator = ThumbnailGenerator.init(allocator, "thumbnails");
         const photos_dir = "test_photos";
-        
+
+        // Initialize database
+        const database = try Database.init(allocator, "tidyphotos.db");
+
+        // Ensure people directory exists
+        var people_dir_path_buf: [512]u8 = undefined;
+        const people_dir_path = try std.fmt.bufPrint(people_dir_path_buf[0..], "{s}/people", .{photos_dir});
+        std.fs.cwd().makeDir(people_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+
         print("TidyPhotos: Ready to serve photos from {s}/ (on-demand discovery)\n", .{photos_dir});
-        
+
         return Self{
             .allocator = allocator,
             .photo_importer = photo_importer,
             .thumbnail_generator = thumbnail_generator,
             .photos_dir = photos_dir,
+            .database = database,
         };
     }
 
@@ -251,6 +266,101 @@ const Server = struct {
             } else {
                 try self.send404(socket);
             }
+        } else if (std.mem.eql(u8, path, "/api/people")) {
+            if (std.mem.eql(u8, method, "GET")) {
+                try self.handleGetPeople(socket);
+            } else if (std.mem.eql(u8, method, "POST")) {
+                try self.handleCreatePerson(socket);
+            } else {
+                try self.sendMethodNotAllowed(socket);
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/people/")) {
+            // Extract person ID: /api/people/{id}
+            const prefix_len = "/api/people/".len;
+            if (path.len > prefix_len) {
+                const person_part = path[prefix_len..];
+
+                // Check if it ends with a sub-path
+                if (std.mem.indexOf(u8, person_part, "/")) |slash_idx| {
+                    const person_id_str = person_part[0..slash_idx];
+                    const sub_path = person_part[slash_idx..];
+
+                    const person_id = std.fmt.parseInt(i64, person_id_str, 10) catch {
+                        try self.send404(socket);
+                        return;
+                    };
+
+                    if (std.mem.startsWith(u8, sub_path, "/photos/")) {
+                        // Extract photo ID: /api/people/{person_id}/photos/{photo_id}
+                        const photo_prefix_len = "/photos/".len;
+                        if (sub_path.len > photo_prefix_len) {
+                            const photo_id_str = sub_path[photo_prefix_len..];
+                            const photo_id = std.fmt.parseInt(i64, photo_id_str, 10) catch {
+                                try self.send404(socket);
+                                return;
+                            };
+
+                            if (std.mem.eql(u8, method, "POST")) {
+                                try self.handleTagPersonInPhoto(socket, person_id, photo_id);
+                            } else if (std.mem.eql(u8, method, "DELETE")) {
+                                try self.handleUntagPersonFromPhoto(socket, person_id, photo_id);
+                            } else {
+                                try self.sendMethodNotAllowed(socket);
+                            }
+                        } else {
+                            try self.send404(socket);
+                        }
+                    } else {
+                        try self.send404(socket);
+                    }
+                } else {
+                    // Single person operations: /api/people/{id}
+                    const person_id = std.fmt.parseInt(i64, person_part, 10) catch {
+                        try self.send404(socket);
+                        return;
+                    };
+
+                    if (std.mem.eql(u8, method, "PUT")) {
+                        try self.handleUpdatePerson(socket, person_id);
+                    } else if (std.mem.eql(u8, method, "DELETE")) {
+                        try self.handleDeletePerson(socket, person_id);
+                    } else {
+                        try self.sendMethodNotAllowed(socket);
+                    }
+                }
+            } else {
+                try self.send404(socket);
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/photos/") and std.mem.endsWith(u8, path, "/detect-faces")) {
+            // Extract photo name: /api/photos/{photo_name}/detect-faces
+            const prefix_len = "/api/photos/".len;
+            const suffix_len = "/detect-faces".len;
+            if (path.len > prefix_len + suffix_len) {
+                const photo_name = path[prefix_len..path.len - suffix_len];
+
+                if (std.mem.eql(u8, method, "POST")) {
+                    try self.handleDetectFaces(socket, photo_name);
+                } else {
+                    try self.sendMethodNotAllowed(socket);
+                }
+            } else {
+                try self.send404(socket);
+            }
+        } else if (std.mem.startsWith(u8, path, "/api/photos/") and std.mem.endsWith(u8, path, "/match-faces")) {
+            // Extract photo name: /api/photos/{photo_name}/match-faces
+            const prefix_len = "/api/photos/".len;
+            const suffix_len = "/match-faces".len;
+            if (path.len > prefix_len + suffix_len) {
+                const photo_name = path[prefix_len..path.len - suffix_len];
+
+                if (std.mem.eql(u8, method, "POST")) {
+                    try self.handleMatchFaces(socket, photo_name);
+                } else {
+                    try self.sendMethodNotAllowed(socket);
+                }
+            } else {
+                try self.send404(socket);
+            }
         } else {
             try self.send404(socket);
         }
@@ -401,6 +511,281 @@ const Server = struct {
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{s}",
             .{ message.len, message });
         _ = try std.posix.write(socket, response);
+    }
+
+    fn handleGetPeople(self: *Self, socket: std.posix.fd_t) !void {
+        const people = self.database.getPeople(self.allocator) catch |err| {
+            print("❌ Failed to get people: {}\n", .{err});
+            try self.sendInternalServerError(socket);
+            return;
+        };
+        defer {
+            for (people) |person| {
+                self.allocator.free(person.name);
+                if (person.face_encodings) |encodings| {
+                    self.allocator.free(encodings);
+                }
+            }
+            self.allocator.free(people);
+        }
+
+        var json = std.ArrayList(u8).init(self.allocator);
+        defer json.deinit();
+
+        try json.append('[');
+        for (people, 0..) |person, i| {
+            if (i > 0) try json.append(',');
+            const person_json = try std.fmt.allocPrint(self.allocator,
+                \\{{"id":{}, "name":"{s}", "created_at":{}}}
+            , .{ person.id, person.name, person.created_at });
+            defer self.allocator.free(person_json);
+            try json.appendSlice(person_json);
+        }
+        try json.append(']');
+
+        const json_response = try json.toOwnedSlice();
+        defer self.allocator.free(json_response);
+
+        var response_buffer: [1024]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            .{json_response.len});
+        _ = try std.posix.write(socket, response);
+        _ = try std.posix.write(socket, json_response);
+    }
+
+    fn handleCreatePerson(self: *Self, socket: std.posix.fd_t) !void {
+        // For now, just create a person with a default name
+        // In a real implementation, you'd parse the request body
+        const person_id = self.database.insertPerson("New Person", null) catch |err| {
+            print("❌ Failed to create person: {}\n", .{err});
+            try self.sendInternalServerError(socket);
+            return;
+        };
+
+        const response_json = try std.fmt.allocPrint(self.allocator,
+            \\{{"id":{}, "name":"New Person"}}
+        , .{person_id});
+        defer self.allocator.free(response_json);
+
+        var response_buffer: [1024]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            .{response_json.len});
+        _ = try std.posix.write(socket, response);
+        _ = try std.posix.write(socket, response_json);
+    }
+
+    fn handleUpdatePerson(self: *Self, socket: std.posix.fd_t, person_id: i64) !void {
+        // For now, just update with a default name
+        // In a real implementation, you'd parse the request body
+        self.database.updatePerson(person_id, "Updated Person", null) catch |err| {
+            print("❌ Failed to update person {}: {}\n", .{ person_id, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+
+        try self.sendSuccessResponse(socket, "Person updated successfully");
+    }
+
+    fn handleDeletePerson(self: *Self, socket: std.posix.fd_t, person_id: i64) !void {
+        self.database.deletePerson(person_id) catch |err| {
+            print("❌ Failed to delete person {}: {}\n", .{ person_id, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+
+        try self.sendSuccessResponse(socket, "Person deleted successfully");
+    }
+
+    fn handleTagPersonInPhoto(self: *Self, socket: std.posix.fd_t, person_id: i64, photo_id: i64) !void {
+        _ = self.database.tagPersonInPhoto(photo_id, person_id, 1.0, true) catch |err| {
+            print("❌ Failed to tag person {} in photo {}: {}\n", .{ person_id, photo_id, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+
+        try self.sendSuccessResponse(socket, "Person tagged in photo successfully");
+    }
+
+    fn handleUntagPersonFromPhoto(self: *Self, socket: std.posix.fd_t, person_id: i64, photo_id: i64) !void {
+        self.database.untagPersonFromPhoto(photo_id, person_id) catch |err| {
+            print("❌ Failed to untag person {} from photo {}: {}\n", .{ person_id, photo_id, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+
+        try self.sendSuccessResponse(socket, "Person untagged from photo successfully");
+    }
+
+    fn createPersonDirectory(self: *Self, person_name: []const u8) !void {
+        var person_dir_path_buf: [512]u8 = undefined;
+        const person_dir_path = try std.fmt.bufPrint(person_dir_path_buf[0..], "{s}/people/{s}", .{ self.photos_dir, person_name });
+
+        std.fs.cwd().makeDir(person_dir_path) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+
+    fn addPhotoToPersonDirectory(self: *Self, person_name: []const u8, photo_name: []const u8) !void {
+        // Ensure person directory exists
+        try self.createPersonDirectory(person_name);
+
+        // Create symlink: people/{person_name}/photo.jpg -> ../../photo.jpg
+        var source_path_buf: [512]u8 = undefined;
+        const source_path = try std.fmt.bufPrint(source_path_buf[0..], "../../{s}", .{photo_name});
+
+        var target_path_buf: [512]u8 = undefined;
+        const target_path = try std.fmt.bufPrint(target_path_buf[0..], "{s}/people/{s}/{s}", .{ self.photos_dir, person_name, photo_name });
+
+        // Remove existing symlink if it exists
+        std.fs.cwd().deleteFile(target_path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+
+        // Create new symlink
+        try std.fs.cwd().symLink(source_path, target_path, .{});
+        print("👤 Added '{s}' to {s}'s photos\n", .{ photo_name, person_name });
+    }
+
+    fn removePhotoFromPersonDirectory(self: *Self, person_name: []const u8, photo_name: []const u8) !void {
+        var person_photo_path_buf: [512]u8 = undefined;
+        const person_photo_path = try std.fmt.bufPrint(person_photo_path_buf[0..], "{s}/people/{s}/{s}", .{ self.photos_dir, person_name, photo_name });
+
+        std.fs.cwd().deleteFile(person_photo_path) catch |err| switch (err) {
+            error.FileNotFound => return, // Already not in person's directory
+            else => return err,
+        };
+        print("👤 Removed '{s}' from {s}'s photos\n", .{ photo_name, person_name });
+    }
+
+    fn handleDetectFaces(self: *Self, socket: std.posix.fd_t, photo_name: []const u8) !void {
+        var photo_path_buf: [512]u8 = undefined;
+        const photo_path = try std.fmt.bufPrint(photo_path_buf[0..], "{s}/{s}", .{ self.photos_dir, photo_name });
+
+        // Check if photo exists
+        std.fs.cwd().access(photo_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => {
+                try self.send404(socket);
+                return;
+            },
+            else => return err,
+        };
+
+        // Run face detection via Node.js script
+        const cmd = [_][]const u8{ "node", "scripts/face-detection.cjs", "detect", photo_path };
+
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &cmd,
+        }) catch |err| {
+            print("❌ Failed to run face detection for {s}: {}\n", .{ photo_name, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term != .Exited or result.term.Exited != 0) {
+            print("❌ Face detection failed for {s}: {s}\n", .{ photo_name, result.stderr });
+            try self.sendInternalServerError(socket);
+            return;
+        }
+
+        // Return the JSON response from the Node.js script
+        var response_buffer: [1024]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            .{result.stdout.len});
+        _ = try std.posix.write(socket, response);
+        _ = try std.posix.write(socket, result.stdout);
+
+        print("🔍 Detected faces in {s}\n", .{photo_name});
+    }
+
+    fn handleMatchFaces(self: *Self, socket: std.posix.fd_t, photo_name: []const u8) !void {
+        var photo_path_buf: [512]u8 = undefined;
+        const photo_path = try std.fmt.bufPrint(photo_path_buf[0..], "{s}/{s}", .{ self.photos_dir, photo_name });
+
+        // Check if photo exists
+        std.fs.cwd().access(photo_path, .{}) catch |err| switch (err) {
+            error.FileNotFound => {
+                try self.send404(socket);
+                return;
+            },
+            else => return err,
+        };
+
+        // Get all people with face encodings from database
+        const people = self.database.getPeople(self.allocator) catch |err| {
+            print("❌ Failed to get people for face matching: {}\n", .{err});
+            try self.sendInternalServerError(socket);
+            return;
+        };
+        defer {
+            for (people) |person| {
+                self.allocator.free(person.name);
+                if (person.face_encodings) |encodings| {
+                    self.allocator.free(encodings);
+                }
+            }
+            self.allocator.free(people);
+        }
+
+        // Build known encodings JSON for the Node.js script
+        var known_encodings = std.ArrayList(u8).init(self.allocator);
+        defer known_encodings.deinit();
+
+        try known_encodings.append('[');
+        var first = true;
+        for (people) |person| {
+            if (person.face_encodings) |encodings| {
+                if (!first) try known_encodings.append(',');
+                first = false;
+
+                const person_encoding = try std.fmt.allocPrint(self.allocator,
+                    \\{{"personId":{}, "descriptor":"{s}"}}
+                , .{ person.id, encodings });
+                defer self.allocator.free(person_encoding);
+                try known_encodings.appendSlice(person_encoding);
+            }
+        }
+        try known_encodings.append(']');
+
+        const known_encodings_json = try known_encodings.toOwnedSlice();
+        defer self.allocator.free(known_encodings_json);
+
+        // Run face matching via Node.js script
+        const cmd = [_][]const u8{ "node", "scripts/face-detection.cjs", "match", photo_path, known_encodings_json };
+
+        const result = std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &cmd,
+        }) catch |err| {
+            print("❌ Failed to run face matching for {s}: {}\n", .{ photo_name, err });
+            try self.sendInternalServerError(socket);
+            return;
+        };
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        if (result.term != .Exited or result.term.Exited != 0) {
+            print("❌ Face matching failed for {s}: {s}\n", .{ photo_name, result.stderr });
+            try self.sendInternalServerError(socket);
+            return;
+        }
+
+        // Return the JSON response from the Node.js script
+        var response_buffer: [1024]u8 = undefined;
+        const response = try std.fmt.bufPrint(response_buffer[0..],
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            .{result.stdout.len});
+        _ = try std.posix.write(socket, response);
+        _ = try std.posix.write(socket, result.stdout);
+
+        print("🎯 Matched faces in {s}\n", .{photo_name});
     }
 };
 
