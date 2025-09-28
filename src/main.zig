@@ -5,6 +5,9 @@ const print = std.debug.print;
 // Import our database module
 const Database = @import("models/database.zig").Database;
 
+// Global database reference for handlers
+var global_database: ?*Database = null;
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -13,6 +16,9 @@ pub fn main() !void {
     // Initialize database
     var database = try Database.init(allocator, "photos.db");
     defer database.deinit();
+
+    // Set global database reference for handlers
+    global_database = &database;
 
     // Create a server with httpz
     var server = try httpz.Server().init(allocator, .{ .port = 8080 });
@@ -284,9 +290,35 @@ fn removeFavoriteHandler(req: *httpz.Request, res: *httpz.Response) !void {
 
 fn getPeopleHandler(req: *httpz.Request, res: *httpz.Response) !void {
     _ = req;
-    // TODO: Get people from database
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    const people = db.getPeople(res.arena) catch |err| {
+        print("❌ Error getting people: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to get people";
+        return;
+    };
+    defer res.arena.free(people);
+
+    // Convert to JSON format expected by frontend
+    var json_people = std.ArrayList(std.json.Value).init(res.arena);
+    for (people) |person| {
+        try json_people.append(.{
+            .object = std.json.ObjectMap.init(res.arena),
+        });
+        const obj = &json_people.items[json_people.items.len - 1].object;
+        try obj.put("id", .{ .integer = person.id });
+        try obj.put("name", .{ .string = person.name });
+        try obj.put("photoCount", .{ .integer = 0 }); // TODO: Calculate actual photo count
+    }
+
     res.status = 200;
-    try res.json(.{ .people = .{} }, .{});
+    try res.json(.{ .people = json_people.items }, .{});
 }
 
 fn createPersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -298,29 +330,105 @@ fn createPersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
         return;
     };
 
-    // TODO: Create person in database
-    print("✅ Creating person: {s}\n", .{body.name});
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    // Create person in database
+    const person_id = db.insertPerson(body.name, null) catch |err| {
+        print("❌ Error creating person: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to create person";
+        return;
+    };
+
+    print("✅ Created person: {s} with ID: {}\n", .{ body.name, person_id });
 
     res.status = 201;
     try res.json(.{
         .person = .{
-            .id = 1,
+            .id = person_id,
             .name = body.name,
-            .photo_count = 0
+            .photoCount = 0
         }
     }, .{});
 }
 
 fn updatePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
-    // TODO: Implement person update
+    const person_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing person ID";
+        return;
+    };
+
+    const person_id = std.fmt.parseInt(i64, person_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid person ID";
+        return;
+    };
+
+    const body_result = try req.json(struct { name: []const u8 });
+    const body = body_result orelse {
+        res.status = 400;
+        res.body = "Bad Request";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    db.updatePerson(person_id, body.name, null) catch |err| {
+        print("❌ Error updating person: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to update person";
+        return;
+    };
+
+    print("✅ Updated person ID {}: {s}\n", .{ person_id, body.name });
+
     res.status = 200;
-    try res.json(.{ .success = true }, .{});
+    try res.json(.{
+        .person = .{
+            .id = person_id,
+            .name = body.name,
+            .photoCount = 0
+        }
+    }, .{});
 }
 
 fn deletePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
-    // TODO: Implement person deletion
+    const person_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing person ID";
+        return;
+    };
+
+    const person_id = std.fmt.parseInt(i64, person_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid person ID";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    db.deletePerson(person_id) catch |err| {
+        print("❌ Error deleting person: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to delete person";
+        return;
+    };
+
+    print("✅ Deleted person ID: {}\n", .{person_id});
+
     res.status = 200;
     try res.json(.{ .success = true }, .{});
 }

@@ -1006,4 +1006,108 @@ button:focus {
         gap: 1rem;
         align-items: stretch;
     }
+
+    /* Face tagging mobile adjustments */
+    .face-tag-controls {
+        top: -25px !important;
+    }
+
+    .face-tag-controls button {
+        padding: 1px 4px !important;
+        font-size: 10px !important;
+    }
+
+    .tagging-instructions {
+        font-size: 12px !important;
+        padding: 8px !important;
+    }
+}
+
+/* Face Tagging Styles */
+.tag-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #fff;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tag-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.tag-btn.active {
+    background: #007AFF;
+    border-color: #007AFF;
+}
+
+.save-tags-btn {
+    background: #34C759;
+    border: 1px solid #34C759;
+    color: #fff;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.save-tags-btn:hover {
+    background: #30D158;
+    border-color: #30D158;
+}
+
+.face-tag-overlay {
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+.face-tag-overlay:hover {
+    border-color: #FF9500 !important;
+    background: rgba(255, 149, 0, 0.3) !important;
+}
+
+.face-tag-controls button {
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.face-tag-controls button:hover {
+    opacity: 0.8;
+}
+
+.tagging-instructions {
+    user-select: none;
+    pointer-events: none;
+}
+
+.save-tags-btn {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.save-tags-btn:hover {
+    background: #30A954 !important;
+    transform: translateY(-1px);
+}
+
+.person-assign-btn:hover {
+    background: #f5f5f5 !important;
+    border-color: #007AFF !important;
+}
+
+.photo-container {
+    user-select: none;
+}
+
+.photo-container.tagging-mode {
+    cursor: crosshair;
 }

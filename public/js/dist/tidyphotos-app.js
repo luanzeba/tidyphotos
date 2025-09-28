@@ -120,6 +120,18 @@ export class TidyPhotosApp {
     get people() {
         return this.peopleManager.people;
     }
+    get taggingMode() {
+        return this.viewer.isTaggingMode;
+    }
+    get faceTags() {
+        return this.viewer.faceTags;
+    }
+    get isDrawingTag() {
+        return this.viewer.isDrawing;
+    }
+    get drawingPreview() {
+        return this.viewer.drawingPreview;
+    }
     // Initialization
     async init() {
         console.log('🚀 TidyPhotos: Initializing...');
@@ -190,6 +202,7 @@ export class TidyPhotosApp {
     async deletePerson(id) {
         return await this.peopleManager.deletePerson(id);
     }
+    // Face tagging methods removed - Alpine.js wrappers now call viewer directly
     // Alpine.js compatibility methods
     scrollSelectedIntoView() {
         // Use setTimeout to simulate $nextTick
@@ -236,6 +249,12 @@ window.photoApp = function () {
             showAddPersonModal: false,
             showEditPersonModal: false,
             personForm: { id: null, name: '' },
+            taggingMode: false,
+            faceTags: [],
+            showTagAssignModal: false,
+            selectedTagId: null,
+            isDrawingTag: false,
+            drawingPreview: null,
             // Initialization
             async init() {
                 // Load thumbnail size from localStorage
@@ -264,6 +283,10 @@ window.photoApp = function () {
                 this.filteredPhotos = appInstance.filteredPhotos.map(photo => ({ ...photo }));
                 this.currentView = appInstance.currentView;
                 this.people = appInstance.people.map(person => ({ ...person }));
+                this.taggingMode = appInstance.taggingMode;
+                this.faceTags = appInstance.faceTags.map(tag => ({ ...tag }));
+                this.isDrawingTag = appInstance.isDrawingTag;
+                this.drawingPreview = appInstance.drawingPreview ? { ...appInstance.drawingPreview } : null;
             },
             // Methods (bound to the instance)
             selectPhoto(photoId) {
@@ -369,6 +392,46 @@ window.photoApp = function () {
                 this.showEditPersonModal = false;
                 this.personForm.id = null;
                 this.personForm.name = '';
+            },
+            // Face tagging methods - call FullscreenViewer directly
+            toggleTaggingMode() {
+                appInstance.getViewer().toggleTaggingMode();
+                this.updateData();
+            },
+            startDrawingTag(event) {
+                appInstance.getViewer().startDrawingTag(event);
+                this.updateData();
+            },
+            updateDrawingTag(event) {
+                appInstance.getViewer().updateDrawingTag(event);
+                this.updateData();
+            },
+            finishDrawingTag(event) {
+                appInstance.getViewer().finishDrawingTag(event);
+                this.updateData();
+            },
+            removeTag(tagId) {
+                appInstance.getViewer().removeTag(tagId);
+                this.updateData();
+            },
+            openTagAssignModal(tagId) {
+                this.selectedTagId = tagId;
+                this.showTagAssignModal = true;
+            },
+            assignPersonToTag(personId, personName) {
+                if (this.selectedTagId) {
+                    appInstance.getViewer().assignPersonToTag(this.selectedTagId, personId, personName);
+                    this.closeTagAssignModal();
+                    this.updateData();
+                }
+            },
+            closeTagAssignModal() {
+                this.showTagAssignModal = false;
+                this.selectedTagId = null;
+            },
+            async saveFaceTags() {
+                await appInstance.getViewer().saveFaceTags();
+                this.updateData();
             }
         };
     }

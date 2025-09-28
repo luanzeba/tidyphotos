@@ -215,8 +215,17 @@
                     <span x-text="`${currentPhotoIndex + 1} of ${filteredPhotos.length}`"></span>
                 </div>
                 <div class="photo-viewer-controls">
-                    <button 
-                        @click="toggleFullScreenFavorite" 
+                    <button
+                        @click="toggleTaggingMode"
+                        class="tag-btn"
+                        :class="{ active: taggingMode }"
+                        title="Tag Faces (T)">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L19 7V9L17 9V11L19 11V13L21 13V11L23 11V9M16 4C16 6.21 14.21 8 12 8C9.79 8 8 6.21 8 4C8 1.79 9.79 0 12 0C14.21 0 16 1.79 16 4Z"/>
+                        </svg>
+                    </button>
+                    <button
+                        @click="toggleFullScreenFavorite"
                         class="favorite-heart-fullscreen"
                         :class="{ active: currentPhoto?.favorite }"
                         title="Favorite (F)">
@@ -242,11 +251,74 @@
                 </button>
                 
                 <div class="photo-viewer-main">
-                    <img 
-                        :src="currentPhoto?.thumbnail" 
-                        :alt="currentPhoto?.name"
-                        class="full-screen-photo"
-                        @click="closeFullScreen">
+                    <div
+                        class="photo-container"
+                        :class="{ 'tagging-mode': taggingMode }"
+                        style="position: relative; display: inline-block;"
+                        @mousedown="startDrawingTag($event)"
+                        @mousemove="updateDrawingTag($event)"
+                        @mouseup="finishDrawingTag($event)">
+                        <img
+                            :src="currentPhoto?.thumbnail"
+                            :alt="currentPhoto?.name"
+                            class="full-screen-photo"
+                            @click.stop
+                            :draggable="false"
+                            style="max-width: 100%; max-height: 80vh; display: block; user-select: none;">
+
+                        <!-- Face tag overlays -->
+                        <template x-for="tag in faceTags" :key="tag.id">
+                            <div
+                                class="face-tag-overlay"
+                                :style="`position: absolute; left: ${tag.x}%; top: ${tag.y}%; width: ${tag.width}%; height: ${tag.height}%; border: 2px solid #007AFF; background: rgba(0, 122, 255, 0.2); z-index: 10;`">
+                                <div class="face-tag-controls" style="position: absolute; top: -30px; left: 0; display: flex; gap: 5px;">
+                                    <button
+                                        @click.stop="openTagAssignModal(tag.id)"
+                                        class="tag-assign-btn"
+                                        :title="tag.personName || 'Assign Person'"
+                                        style="background: #007AFF; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
+                                        <span x-text="tag.personName || '+'"></span>
+                                    </button>
+                                    <button
+                                        @click.stop="removeTag(tag.id)"
+                                        class="tag-remove-btn"
+                                        title="Remove Tag"
+                                        style="background: #FF3B30; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
+                                        ✕
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Drawing preview rectangle -->
+                        <div x-show="isDrawingTag && drawingPreview"
+                             class="drawing-preview"
+                             :style="`position: absolute; left: ${drawingPreview?.x || 0}%; top: ${drawingPreview?.y || 0}%; width: ${drawingPreview?.width || 0}%; height: ${drawingPreview?.height || 0}%; border: 2px dashed #FF9500; background: rgba(255, 149, 0, 0.2); z-index: 15; pointer-events: none;`">
+                        </div>
+
+                        <!-- First click indicator for click-click mode -->
+                        <div x-show="isDrawingTag && (!drawingPreview || (drawingPreview?.width === 0 && drawingPreview?.height === 0))"
+                             class="first-click-indicator"
+                             :style="`position: absolute; left: calc(${drawingPreview?.x || 0}% - 4px); top: calc(${drawingPreview?.y || 0}% - 4px); width: 8px; height: 8px; background: #FF9500; border: 2px solid white; border-radius: 50%; z-index: 16; pointer-events: none;`">
+                        </div>
+
+                        <!-- Tagging instructions -->
+                        <div x-show="taggingMode && faceTags.length === 0" class="tagging-instructions"
+                             style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border-radius: 5px; z-index: 20;">
+                            <p style="margin: 0; font-size: 14px;">Draw a box around a face:</p>
+                            <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.8;">Click one corner, then click the opposite corner</p>
+                            <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.6;">Press 'T' to exit tagging mode</p>
+                        </div>
+
+                        <!-- Save button when tags exist -->
+                        <div x-show="taggingMode && faceTags.length > 0" class="tagging-save"
+                             style="position: absolute; bottom: 20px; right: 20px; z-index: 20;">
+                            <button @click.stop="saveFaceTags()" class="save-tags-btn"
+                                    style="background: #34C759; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold;">
+                                Save Tags
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 
                 <button 
@@ -289,6 +361,34 @@
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tag Assignment Modal -->
+        <div x-show="showTagAssignModal" class="modal-overlay" @click.self="closeTagAssignModal()">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>Assign Person to Face Tag</h3>
+                    <button @click="closeTagAssignModal()" class="close-btn">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="person-list" style="max-height: 300px; overflow-y: auto;">
+                        <template x-for="person in people" :key="person.id">
+                            <button
+                                @click="assignPersonToTag(person.id, person.name)"
+                                class="person-assign-btn"
+                                style="display: block; width: 100%; text-align: left; padding: 10px; margin-bottom: 5px; border: 1px solid #ddd; border-radius: 5px; background: white; color: #333; cursor: pointer; transition: background-color 0.2s;"
+                                @mouseover="$el.style.backgroundColor = '#f0f0f0'"
+                                @mouseout="$el.style.backgroundColor = 'white'"
+                                x-text="person.name">
+                            </button>
+                        </template>
+
+                        <div x-show="people.length === 0" style="text-align: center; padding: 20px; color: #666;">
+                            <p>No people available. Add people first in the People tab.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
