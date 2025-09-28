@@ -10,6 +10,8 @@
     "dev": "npm run build && ./zig-out/bin/tidyphotos",
     "start": "./zig-out/bin/tidyphotos",
     "test": "vitest",
+    "test:unit": "vitest --exclude tests/integration/",
+    "test:integration": "vitest tests/integration/",
     "test:ui": "vitest --ui",
     "test:run": "vitest run"
   },
