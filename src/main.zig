@@ -42,6 +42,12 @@ pub fn main() !void {
     router.put("/api/people/:id", updatePersonHandler);
     router.delete("/api/people/:id", deletePersonHandler);
 
+    // Face tag API routes
+    router.get("/api/photos/:filename/face-tags", getFaceTagsHandler);
+    router.post("/api/photos/:filename/face-tags", createFaceTagHandler);
+    router.put("/api/face-tags/:id", updateFaceTagHandler);
+    router.delete("/api/face-tags/:id", deleteFaceTagHandler);
+
     // All other routes serve index.html for client-side routing
     router.all("*", indexHandler);
 
@@ -303,7 +309,6 @@ fn getPeopleHandler(req: *httpz.Request, res: *httpz.Response) !void {
         res.body = "Failed to get people";
         return;
     };
-    defer res.arena.free(people);
 
     // Convert to JSON format expected by frontend
     var json_people = std.ArrayList(std.json.Value).init(res.arena);
@@ -428,6 +433,219 @@ fn deletePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
     };
 
     print("✅ Deleted person ID: {}\n", .{person_id});
+
+    res.status = 200;
+    try res.json(.{ .success = true }, .{});
+}
+
+fn getFaceTagsHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const photo_filename = req.param("filename") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing photo filename";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    const face_tags = db.getFaceTagsForPhoto(res.arena, photo_filename) catch |err| {
+        print("❌ Error getting face tags: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to get face tags";
+        return;
+    };
+
+    // Convert to JSON format expected by frontend
+    var json_tags = std.ArrayList(std.json.Value).init(res.arena);
+    for (face_tags) |tag| {
+        var obj = std.json.ObjectMap.init(res.arena);
+        try obj.put("id", .{ .integer = tag.id });
+        try obj.put("x", .{ .float = tag.x });
+        try obj.put("y", .{ .float = tag.y });
+        try obj.put("width", .{ .float = tag.width });
+        try obj.put("height", .{ .float = tag.height });
+        try obj.put("confidence", .{ .float = tag.confidence });
+        try obj.put("isManual", .{ .bool = tag.is_manual });
+        try obj.put("createdAt", .{ .integer = tag.created_at });
+
+        if (tag.person_id) |pid| {
+            try obj.put("personId", .{ .integer = pid });
+            // Look up person name from people table
+            const person = db.getPerson(res.arena, pid) catch null;
+            const person_name = if (person) |p| p.name else "";
+            try obj.put("personName", .{ .string = person_name });
+        } else {
+            try obj.put("personId", .null);
+            try obj.put("personName", .{ .string = "" });
+        }
+
+        try json_tags.append(.{ .object = obj });
+    }
+
+    res.status = 200;
+    try res.json(.{ .faceTags = json_tags.items }, .{});
+}
+
+fn createFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const photo_filename = req.param("filename") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing photo filename";
+        return;
+    };
+
+    const body_result = try req.json(struct {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        personId: ?i64,
+        confidence: ?f64,
+        isManual: ?bool
+    });
+    const body = body_result orelse {
+        res.status = 400;
+        res.body = "Bad Request";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    const confidence = body.confidence orelse 1.0;
+    const is_manual = body.isManual orelse true;
+
+    const face_tag_id = db.insertFaceTag(
+        photo_filename,
+        body.personId,
+        body.x,
+        body.y,
+        body.width,
+        body.height,
+        confidence,
+        is_manual
+    ) catch |err| {
+        print("❌ Error creating face tag: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to create face tag";
+        return;
+    };
+
+    print("✅ Created face tag for {s} with ID: {}\n", .{ photo_filename, face_tag_id });
+
+    res.status = 201;
+    try res.json(.{
+        .faceTag = .{
+            .id = face_tag_id,
+            .x = body.x,
+            .y = body.y,
+            .width = body.width,
+            .height = body.height,
+            .personId = body.personId,
+            .confidence = confidence,
+            .isManual = is_manual
+        }
+    }, .{});
+}
+
+fn updateFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const face_tag_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing face tag ID";
+        return;
+    };
+
+    const face_tag_id = std.fmt.parseInt(i64, face_tag_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid face tag ID";
+        return;
+    };
+
+    const body_result = try req.json(struct {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        personId: ?i64,
+        confidence: ?f64
+    });
+    const body = body_result orelse {
+        res.status = 400;
+        res.body = "Bad Request";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    const confidence = body.confidence orelse 1.0;
+
+    db.updateFaceTag(
+        face_tag_id,
+        body.personId,
+        body.x,
+        body.y,
+        body.width,
+        body.height,
+        confidence
+    ) catch |err| {
+        print("❌ Error updating face tag: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to update face tag";
+        return;
+    };
+
+    print("✅ Updated face tag ID {}\n", .{face_tag_id});
+
+    res.status = 200;
+    try res.json(.{
+        .faceTag = .{
+            .id = face_tag_id,
+            .x = body.x,
+            .y = body.y,
+            .width = body.width,
+            .height = body.height,
+            .personId = body.personId,
+            .confidence = confidence
+        }
+    }, .{});
+}
+
+fn deleteFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const face_tag_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing face tag ID";
+        return;
+    };
+
+    const face_tag_id = std.fmt.parseInt(i64, face_tag_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid face tag ID";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    db.deleteFaceTag(face_tag_id) catch |err| {
+        print("❌ Error deleting face tag: {}\n", .{err});
+        res.status = 500;
+        res.body = "Failed to delete face tag";
+        return;
+    };
+
+    print("✅ Deleted face tag ID: {}\n", .{face_tag_id});
 
     res.status = 200;
     try res.json(.{ .success = true }, .{});

@@ -9,7 +9,6 @@ export class FullscreenViewer {
         this.originalStartPos = null;
         this.isDragging = false;
         this.clickStartTime = 0;
-        this.photoTagsCache = new Map(); // In-memory storage for face tags per photo
         this.app = app;
     }
     get isFullScreen() {
@@ -50,12 +49,12 @@ export class FullscreenViewer {
         const y = ((event.clientY - rect.top) / rect.height) * 100;
         return { x, y };
     }
-    openFullScreen(photoId) {
+    async openFullScreen(photoId) {
         const photoIndex = this.app.getFilteredPhotos().findIndex(p => p.id === photoId);
         if (photoIndex !== -1) {
             this.currentPhotoIndex = photoIndex;
             this.fullScreenMode = true;
-            this.loadFaceTagsForCurrentPhoto();
+            await this.loadFaceTagsForCurrentPhoto();
             this.app.getRouter().updateUrl(true, this.app.getCurrentGallery(), this.currentPhoto);
         }
     }
@@ -76,12 +75,12 @@ export class FullscreenViewer {
             this.openFullScreenById(photoId);
         }
     }
-    openFullScreenById(photoId) {
+    async openFullScreenById(photoId) {
         const photoIndex = this.app.getFilteredPhotos().findIndex(p => p.id === photoId);
         if (photoIndex !== -1) {
             this.currentPhotoIndex = photoIndex;
             this.fullScreenMode = true;
-            this.loadFaceTagsForCurrentPhoto();
+            await this.loadFaceTagsForCurrentPhoto();
             this.app.setSelectedPhotoId(photoId);
         }
         else {
@@ -94,17 +93,17 @@ export class FullscreenViewer {
         this.fullScreenMode = false;
         this.app.getRouter().updateUrl(false, this.app.getCurrentGallery(), null);
     }
-    nextPhoto() {
+    async nextPhoto() {
         if (this.currentPhotoIndex < this.app.getFilteredPhotos().length - 1) {
             this.currentPhotoIndex++;
-            this.loadFaceTagsForCurrentPhoto();
+            await this.loadFaceTagsForCurrentPhoto();
             this.app.getRouter().updateUrl(true, this.app.getCurrentGallery(), this.currentPhoto);
         }
     }
-    previousPhoto() {
+    async previousPhoto() {
         if (this.currentPhotoIndex > 0) {
             this.currentPhotoIndex--;
-            this.loadFaceTagsForCurrentPhoto();
+            await this.loadFaceTagsForCurrentPhoto();
             this.app.getRouter().updateUrl(true, this.app.getCurrentGallery(), this.currentPhoto);
         }
     }
@@ -202,23 +201,25 @@ export class FullscreenViewer {
         if (!this.isDrawingTag || !this.drawStartPos || !this.originalStartPos)
             return;
         let x, actualY;
+        let isFromClickClick = false;
         if (typeof xOrEvent === 'number') {
-            // Called with coordinates directly
+            // Called with coordinates directly (from click-click mode)
             x = xOrEvent;
             actualY = y;
+            isFromClickClick = true;
         }
         else {
-            // Called with MouseEvent - convert coordinates
+            // Called with MouseEvent (from mouseup)
             const coordinates = this.convertEventToCoordinates(xOrEvent);
             if (!coordinates)
                 return;
             x = coordinates.x;
             actualY = coordinates.y;
+            isFromClickClick = false;
         }
-        const timeSinceStart = Date.now() - this.clickStartTime;
-        // For drag mode: complete the tag if we were dragging
-        // For click-click mode: only complete if this is a second click (not mouseup from drag)
-        const shouldCreateTag = this.isDragging || timeSinceStart < 200; // Quick click = click-click mode
+        // For click-click mode, always create the tag when called from second click
+        // For drag mode, only create if we were actually dragging
+        const shouldCreateTag = isFromClickClick || this.isDragging;
         if (shouldCreateTag) {
             const tag = {
                 id: Date.now(),
@@ -229,14 +230,18 @@ export class FullscreenViewer {
                 personId: null,
                 personName: ''
             };
-            // Only add if tag has reasonable size
-            if (tag.width > 2 && tag.height > 2) {
-                this.currentFaceTags.push(tag);
-                // Update cache immediately when tag is created
-                if (this.currentPhoto?.id) {
-                    this.photoTagsCache.set(this.currentPhoto.id, [...this.currentFaceTags]);
-                }
-                console.log('✅ Added face tag:', tag, 'Total tags:', this.currentFaceTags.length);
+            // Only add if tag has reasonable size (allow smaller tags for click-click mode)
+            const minSize = isFromClickClick ? 1 : 2;
+            if (tag.width > minSize && tag.height > minSize) {
+                // Save to database immediately
+                this.saveFaceTagToDatabase(tag).then(savedTag => {
+                    if (savedTag) {
+                        this.currentFaceTags.push(savedTag);
+                        console.log('✅ Added face tag:', savedTag, 'Total tags:', this.currentFaceTags.length);
+                    }
+                }).catch(error => {
+                    console.error('Failed to save face tag:', error);
+                });
                 // Reset drawing state after successful tag creation
                 this.isDrawingTag = false;
                 this.drawStartPos = null;
@@ -245,8 +250,9 @@ export class FullscreenViewer {
             }
             else {
                 console.log('❌ Tag too small, not added. Size:', tag.width, 'x', tag.height);
-                // For click-click mode, don't reset if tag is too small - wait for second click
-                if (this.isDragging) {
+                // For drag mode, reset state if tag is too small
+                // For click-click mode, always reset since user completed the action
+                if (this.isDragging || isFromClickClick) {
                     this.isDrawingTag = false;
                     this.drawStartPos = null;
                     this.originalStartPos = null;
@@ -255,30 +261,63 @@ export class FullscreenViewer {
             }
         }
         else {
-            // This is a mouseup after dragging started but before significant movement
-            // Don't create tag, but also don't reset state (wait for second click)
+            // This is a mouseup without enough drag - don't create tag, wait for second click
             console.log('🖱️ Mouseup without drag - waiting for second click');
         }
     }
-    removeTag(tagId) {
-        this.currentFaceTags = this.currentFaceTags.filter(tag => tag.id !== tagId);
-        // Update cache immediately when tag is removed
-        if (this.currentPhoto?.id) {
-            this.photoTagsCache.set(this.currentPhoto.id, [...this.currentFaceTags]);
-        }
-    }
-    assignPersonToTag(tagId, personId, personName) {
+    async removeTag(tagId) {
         const tag = this.currentFaceTags.find(t => t.id === tagId);
-        if (tag) {
-            tag.personId = personId;
-            tag.personName = personName;
-            // Update cache immediately when tag is modified
-            if (this.currentPhoto?.id) {
-                this.photoTagsCache.set(this.currentPhoto.id, [...this.currentFaceTags]);
+        if (!tag)
+            return;
+        try {
+            const response = await fetch(`/api/face-tags/${tagId}`, {
+                method: 'DELETE'
+            });
+            if (response.ok) {
+                this.currentFaceTags = this.currentFaceTags.filter(t => t.id !== tagId);
+                console.log('✅ Removed face tag:', tagId);
+            }
+            else {
+                console.error('Failed to remove face tag:', response.statusText);
             }
         }
+        catch (error) {
+            console.error('Error removing face tag:', error);
+        }
     }
-    loadFaceTagsForCurrentPhoto() {
+    async assignPersonToTag(tagId, personId, personName) {
+        const tag = this.currentFaceTags.find(t => t.id === tagId);
+        if (!tag)
+            return;
+        try {
+            const response = await fetch(`/api/face-tags/${tagId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    x: tag.x,
+                    y: tag.y,
+                    width: tag.width,
+                    height: tag.height,
+                    personId: personId,
+                    confidence: tag.confidence || 1.0
+                })
+            });
+            if (response.ok) {
+                tag.personId = personId;
+                tag.personName = personName;
+                console.log('✅ Updated face tag with person:', personName);
+            }
+            else {
+                console.error('Failed to update face tag:', response.statusText);
+            }
+        }
+        catch (error) {
+            console.error('Error updating face tag:', error);
+        }
+    }
+    async loadFaceTagsForCurrentPhoto() {
         // Reset drawing state
         this.taggingMode = false;
         this.isDrawingTag = false;
@@ -286,38 +325,71 @@ export class FullscreenViewer {
         this.originalStartPos = null;
         this.isDragging = false;
         this.clickStartTime = 0;
-        // Load existing tags from cache if they exist
-        if (this.currentPhoto?.id) {
-            const cachedTags = this.photoTagsCache.get(this.currentPhoto.id);
-            if (cachedTags) {
-                this.currentFaceTags = [...cachedTags]; // Create a copy to avoid reference issues
-                console.log('📸 Loaded', cachedTags.length, 'cached face tags for photo', this.currentPhoto.id);
+        // Load existing tags from database
+        if (this.currentPhoto?.name) {
+            try {
+                const response = await fetch(`/api/photos/${encodeURIComponent(this.currentPhoto.name)}/face-tags`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.currentFaceTags = data.faceTags || [];
+                    console.log('📸 Loaded', this.currentFaceTags.length, 'face tags from database for photo', this.currentPhoto.name);
+                }
+                else {
+                    console.warn('Failed to load face tags:', response.statusText);
+                    this.currentFaceTags = [];
+                }
             }
-            else {
+            catch (error) {
+                console.error('Error loading face tags:', error);
                 this.currentFaceTags = [];
-                console.log('📸 No cached face tags for photo', this.currentPhoto.id);
             }
         }
         else {
             this.currentFaceTags = [];
         }
-        // TODO: Implement API call to load existing face tags from database
     }
     async saveFaceTags() {
-        if (!this.currentPhoto || this.currentFaceTags.length === 0)
-            return;
-        // Store tags in cache for persistence across photo switches
-        this.photoTagsCache.set(this.currentPhoto.id, [...this.currentFaceTags]);
-        // TODO: Implement API call to save face tags to database
-        console.log('💾 Saving face tags for photo', this.currentPhoto.id, this.currentFaceTags);
-        // Exit tagging mode after saving
+        // Exit tagging mode after saving (all tags are saved individually to database)
         this.taggingMode = false;
         this.isDrawingTag = false;
         this.drawStartPos = null;
         this.originalStartPos = null;
         this.isDragging = false;
         this.clickStartTime = 0;
-        console.log('✅ Face tags saved successfully (stored in memory cache)');
+        console.log('✅ Face tags saved successfully');
+    }
+    async saveFaceTagToDatabase(tag) {
+        if (!this.currentPhoto?.name)
+            return null;
+        try {
+            const response = await fetch(`/api/photos/${encodeURIComponent(this.currentPhoto.name)}/face-tags`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    x: tag.x,
+                    y: tag.y,
+                    width: tag.width,
+                    height: tag.height,
+                    personId: tag.personId,
+                    confidence: 1.0,
+                    isManual: true
+                })
+            });
+            if (response.ok) {
+                const data = await response.json();
+                return data.faceTag;
+            }
+            else {
+                console.error('Failed to save face tag:', response.statusText);
+                return null;
+            }
+        }
+        catch (error) {
+            console.error('Error saving face tag:', error);
+            return null;
+        }
     }
     handleKeyboard(event) {
         if (!this.fullScreenMode)

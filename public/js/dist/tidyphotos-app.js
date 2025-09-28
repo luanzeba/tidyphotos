@@ -167,8 +167,8 @@ export class TidyPhotosApp {
         return this.photoManager.formatDate(dateString);
     }
     // Fullscreen methods
-    openFullScreen(photoId) {
-        this.viewer.openFullScreen(photoId);
+    async openFullScreen(photoId) {
+        await this.viewer.openFullScreen(photoId);
     }
     openFullScreenFromRoute(photoId) {
         this.viewer.openFullScreenFromRoute(photoId);
@@ -176,14 +176,14 @@ export class TidyPhotosApp {
     closeFullScreen() {
         this.viewer.closeFullScreen();
     }
-    nextPhoto() {
-        this.viewer.nextPhoto();
+    async nextPhoto() {
+        await this.viewer.nextPhoto();
     }
-    previousPhoto() {
-        this.viewer.previousPhoto();
+    async previousPhoto() {
+        await this.viewer.previousPhoto();
     }
-    toggleFullScreenFavorite() {
-        this.viewer.toggleFavorite();
+    async toggleFullScreenFavorite() {
+        await this.viewer.toggleFavorite();
     }
     // Keyboard event handlers
     handleKeyboard(event) {
@@ -313,20 +313,20 @@ window.photoApp = function () {
                 await appInstance.toggleFavorite(photoId);
                 this.updateData();
             },
-            openFullScreen(photoId) {
-                appInstance.openFullScreen(photoId);
+            async openFullScreen(photoId) {
+                await appInstance.openFullScreen(photoId);
                 this.updateData();
             },
             closeFullScreen() {
                 appInstance.closeFullScreen();
                 this.updateData();
             },
-            nextPhoto() {
-                appInstance.nextPhoto();
+            async nextPhoto() {
+                await appInstance.nextPhoto();
                 this.updateData();
             },
-            previousPhoto() {
-                appInstance.previousPhoto();
+            async previousPhoto() {
+                await appInstance.previousPhoto();
                 this.updateData();
             },
             async toggleFullScreenFavorite() {

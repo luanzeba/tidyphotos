@@ -221,8 +221,8 @@ export class TidyPhotosApp {
     }
 
     // Fullscreen methods
-    openFullScreen(photoId: number): void {
-        this.viewer.openFullScreen(photoId);
+    async openFullScreen(photoId: number): Promise<void> {
+        await this.viewer.openFullScreen(photoId);
     }
 
     openFullScreenFromRoute(photoId: number): void {
@@ -233,16 +233,16 @@ export class TidyPhotosApp {
         this.viewer.closeFullScreen();
     }
 
-    nextPhoto(): void {
-        this.viewer.nextPhoto();
+    async nextPhoto(): Promise<void> {
+        await this.viewer.nextPhoto();
     }
 
-    previousPhoto(): void {
-        this.viewer.previousPhoto();
+    async previousPhoto(): Promise<void> {
+        await this.viewer.previousPhoto();
     }
 
-    toggleFullScreenFavorite(): void {
-        this.viewer.toggleFavorite();
+    async toggleFullScreenFavorite(): Promise<void> {
+        await this.viewer.toggleFavorite();
     }
 
     // Keyboard event handlers
@@ -399,8 +399,8 @@ window.photoApp = function(): any {
             this.updateData();
         },
 
-        openFullScreen(photoId: number) {
-            appInstance!.openFullScreen(photoId);
+        async openFullScreen(photoId: number) {
+            await appInstance!.openFullScreen(photoId);
             this.updateData();
         },
 
@@ -409,13 +409,13 @@ window.photoApp = function(): any {
             this.updateData();
         },
 
-        nextPhoto() {
-            appInstance!.nextPhoto();
+        async nextPhoto() {
+            await appInstance!.nextPhoto();
             this.updateData();
         },
 
-        previousPhoto() {
-            appInstance!.previousPhoto();
+        async previousPhoto() {
+            await appInstance!.previousPhoto();
             this.updateData();
         },
 
