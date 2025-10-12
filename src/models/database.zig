@@ -175,7 +175,7 @@ pub const Database = struct {
         }
         defer _ = c.sqlite3_finalize(stmt);
 
-        var photos = std.ArrayList(Photo).init(allocator);
+        var photos = std.ArrayList(Photo){};
         
         while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
             const id = c.sqlite3_column_int64(stmt, 0);
@@ -201,10 +201,10 @@ pub const Database = struct {
                 .metadata_json = if (metadata) |m| try allocator.dupe(u8, m) else null,
             };
             
-            try photos.append(photo);
+            try photos.append(allocator, photo);
         }
 
-        return photos.toOwnedSlice();
+        return photos.toOwnedSlice(allocator);
     }
 
     pub fn insertPerson(self: *Self, name: []const u8, face_encodings: ?[]const u8) !i64 {
@@ -249,7 +249,7 @@ pub const Database = struct {
         }
         defer _ = c.sqlite3_finalize(stmt);
 
-        var people = std.ArrayList(Person).init(allocator);
+        var people = std.ArrayList(Person){};
 
         while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
             const id = c.sqlite3_column_int64(stmt, 0);
@@ -270,10 +270,10 @@ pub const Database = struct {
                 .created_at = created_at,
             };
 
-            try people.append(person);
+            try people.append(allocator, person);
         }
 
-        return people.toOwnedSlice();
+        return people.toOwnedSlice(allocator);
     }
 
     pub fn updatePerson(self: *Self, person_id: i64, name: []const u8, face_encodings: ?[]const u8) !void {
@@ -455,7 +455,7 @@ pub const Database = struct {
 
         _ = c.sqlite3_bind_text(stmt, 1, @ptrCast(photo_filename), @intCast(photo_filename.len), null);
 
-        var face_tags = std.ArrayList(FaceTag).init(allocator);
+        var face_tags = std.ArrayList(FaceTag){};
 
         while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
             const id = c.sqlite3_column_int64(stmt, 0);
@@ -484,10 +484,10 @@ pub const Database = struct {
                 .created_at = created_at,
             };
 
-            try face_tags.append(face_tag);
+            try face_tags.append(allocator, face_tag);
         }
 
-        return face_tags.toOwnedSlice();
+        return face_tags.toOwnedSlice(allocator);
     }
 
     pub fn updateFaceTag(self: *Self, face_tag_id: i64, person_id: ?i64, x: f64, y: f64, width: f64, height: f64, confidence: f64) !void {

@@ -6,9 +6,11 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "tidyphotos",
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     // Add httpz dependency
@@ -18,9 +20,16 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("httpz", httpz.module("httpz"));
 
-    // Add SQLite dependency
-    exe.linkLibC();
+    // Add zig-sqlite dependency
+    const sqlite = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
+
+    // Link system SQLite (still needed for zig-sqlite)
     exe.linkSystemLibrary("sqlite3");
+    exe.linkLibC();
 
     b.installArtifact(exe);
 
@@ -36,9 +45,11 @@ pub fn build(b: *std.Build) void {
 
     // Tests
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);

@@ -1,10 +1,15 @@
 .{
-    .name = "tidyphotos",
+    .name = .tidyphotos,
+    .fingerprint = 0x780d00a8aed2f42f,
     .version = "0.1.0",
     .dependencies = .{
         .httpz = .{
-            .url = "https://github.com/karlseguin/http.zig/archive/zig-0.13.tar.gz",
-            .hash = "12203254adcaba63705ff7ecf1894a5a26d5a5a0a9cfecd01423775fa5566b625138",
+            .url = "git+https://github.com/karlseguin/http.zig#00014146eaf9e17750b752fa4905f7623fbe30f7",
+            .hash = "httpz-0.0.0-PNVzrFndBgDr9zQx7Mj_MFiqYslgcRlx45FJ_gERmRTb",
+        },
+        .sqlite = .{
+            .url = "https://github.com/vrischmann/zig-sqlite/archive/refs/heads/master.tar.gz",
+            .hash = "1220c5bf0c2ccad9bb64e35c4aa601a37aafd4f9973adc37b6a2c0a503a672504fb2",
         },
     },
     .paths = .{""},

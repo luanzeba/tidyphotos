@@ -4,6 +4,7 @@ import { Router } from './router.js';
 import { FullscreenViewer } from './fullscreen-viewer.js';
 import { KeyboardHandler } from './keyboard-handler.js';
 import { PeopleManager } from './people-manager.js';
+import { PreloadManager } from './preload-manager.js';
 export class TidyPhotosApp {
     constructor() {
         // App state
@@ -15,6 +16,7 @@ export class TidyPhotosApp {
         this.photoManager = new PhotoManager();
         this.timelineManager = new TimelineManager();
         this.peopleManager = new PeopleManager();
+        this.preloadManager = new PreloadManager();
         this.viewer = new FullscreenViewer(this);
         this.keyboardHandler = new KeyboardHandler(this);
         this.router = new Router(this);
@@ -141,10 +143,27 @@ export class TidyPhotosApp {
         ]);
         this.router.handleInitialRoute();
         console.log('✅ TidyPhotos: Initialization complete');
+
+        // Start background preloading after thumbnails are loaded
+        // Small delay to let thumbnails render first
+        setTimeout(() => {
+            const photos = this.getFilteredPhotos();
+            if (photos && photos.length > 0) {
+                console.log('⚡ Starting background preload for', photos.length, 'photos');
+                this.preloadManager.startPreloading(photos, 0);
+            }
+        }, 500);
     }
     // Photo selection
     selectPhoto(photoId) {
         this.selectedPhotoId = photoId;
+
+        // Restart preloading from new selection (spiral strategy)
+        const photos = this.getFilteredPhotos();
+        const currentIndex = photos.findIndex(p => p.id === photoId);
+        if (currentIndex !== -1) {
+            this.preloadManager.startPreloading(photos, currentIndex);
+        }
     }
     // Timeline methods
     selectYear(year) {

@@ -2,45 +2,63 @@ const std = @import("std");
 const httpz = @import("httpz");
 const print = std.debug.print;
 
-// Import our database module
+// Import our modules
 const Database = @import("models/database.zig").Database;
+const ThumbnailGenerator = @import("thumbnails/thumbnail_generator.zig").ThumbnailGenerator;
 
-// Global database reference for handlers
+// Global references for handlers
 var global_database: ?*Database = null;
+var global_thumbnail_generator: ?*ThumbnailGenerator = null;
+var global_allocator: ?std.mem.Allocator = null;
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    global_allocator = allocator;
+
     // Initialize database
     var database = try Database.init(allocator, "photos.db");
     defer database.deinit();
-
-    // Set global database reference for handlers
     global_database = &database;
 
+    // Initialize thumbnail generator
+    var thumbnail_gen = ThumbnailGenerator.init(allocator, "cache");
+    global_thumbnail_generator = &thumbnail_gen;
+
+    // Scan and index photo library on startup
+    print("\n⚡ Scanning photo library...\n", .{});
+    try scanAndIndexPhotos(allocator, &database, &thumbnail_gen);
+
     // Create a server with httpz
-    var server = try httpz.Server().init(allocator, .{ .port = 8080 });
+    var server = try httpz.Server(void).init(allocator, .{
+        .port = 8080,
+        .request = .{
+            .max_body_size = 10 * 1024 * 1024, // 10MB max request body
+        },
+    }, {});
     defer server.deinit();
 
     // Set up routes
-    var router = server.router();
+    var router = try server.router(.{});
 
     // Static file serving
     router.get("/", indexHandler);
     router.get("/js/*", staticHandler);
     router.get("/styles/*", staticHandler);
-    router.get("/photos/*", photosHandler);
+
+    // Optimized photo serving endpoints
+    router.get("/api/thumbnails/:id", thumbnailHandler);
+    router.get("/api/photos/:id/full", fullPhotoHandler);
+    router.get("/photos/*", legacyPhotosHandler); // Legacy endpoint for compatibility
 
     // API routes
     router.get("/api/photos", getPhotosHandler);
+
+    // Favorite routes
     router.put("/api/photos/:name/favorite", addFavoriteHandler);
     router.delete("/api/photos/:name/favorite", removeFavoriteHandler);
-    router.get("/api/people", getPeopleHandler);
-    router.post("/api/people", createPersonHandler);
-    router.put("/api/people/:id", updatePersonHandler);
-    router.delete("/api/people/:id", deletePersonHandler);
 
     // Face tag API routes
     router.get("/api/photos/:filename/face-tags", getFaceTagsHandler);
@@ -48,15 +66,91 @@ pub fn main() !void {
     router.put("/api/face-tags/:id", updateFaceTagHandler);
     router.delete("/api/face-tags/:id", deleteFaceTagHandler);
 
+    // People management routes
+    router.get("/api/people", getPeopleHandler);
+    router.post("/api/people", createPersonHandler);
+    router.put("/api/people/:id", updatePersonHandler);
+    router.delete("/api/people/:id", deletePersonHandler);
+
     // All other routes serve index.html for client-side routing
     router.all("*", indexHandler);
 
-    print("TidyPhotos server listening on:\n", .{});
+    print("\n✅ TidyPhotos server ready!\n", .{});
     print("  Local:   http://127.0.0.1:8080\n", .{});
-    print("  Network: http://192.168.1.201:8080 (accessible from other devices)\n", .{});
+    print("  Network: http://192.168.1.201:8080 (accessible from other devices)\n\n", .{});
 
     // Start the server
     try server.listen();
+}
+
+/// Scan photo directory and index all photos with thumbnails
+fn scanAndIndexPhotos(allocator: std.mem.Allocator, db: *Database, thumb_gen: *ThumbnailGenerator) !void {
+    var dir = std.fs.cwd().openDir("test_photos", .{ .iterate = true }) catch |err| {
+        print("⚠️  Could not open test_photos directory: {}\n", .{err});
+        return;
+    };
+    defer dir.close();
+
+    var iterator = dir.iterate();
+    var photo_count: usize = 0;
+    var new_photos: usize = 0;
+    var thumbnail_count: usize = 0;
+
+    // Get existing photos from database
+    var existing_photos_map = std.StringHashMap(i64).init(allocator);
+    defer existing_photos_map.deinit();
+
+    const existing_photos = try db.getPhotos(allocator);
+    defer {
+        for (existing_photos) |photo| {
+            allocator.free(photo.path);
+            allocator.free(photo.filename);
+            if (photo.metadata_json) |meta| {
+                allocator.free(meta);
+            }
+        }
+        allocator.free(existing_photos);
+    }
+
+    for (existing_photos) |photo| {
+        try existing_photos_map.put(photo.filename, photo.id);
+    }
+
+    while (try iterator.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (!isImageFile(entry.name)) continue;
+
+        photo_count += 1;
+
+        // Check if photo is already in database
+        const photo_id = if (existing_photos_map.get(entry.name)) |id| blk: {
+            break :blk id;
+        } else blk: {
+            // New photo - add to database
+            const full_path = try std.fmt.allocPrint(allocator, "test_photos/{s}", .{entry.name});
+            defer allocator.free(full_path);
+
+            const id = try db.insertPhoto(full_path, entry.name, null);
+            new_photos += 1;
+            print("  📷 Indexed: {s} (ID: {d})\n", .{ entry.name, id });
+            break :blk id;
+        };
+
+        // Generate thumbnail if it doesn't exist
+        if (!thumb_gen.thumbnailExists(photo_id)) {
+            const photo_path = try std.fmt.allocPrint(allocator, "test_photos/{s}", .{entry.name});
+            defer allocator.free(photo_path);
+
+            const thumb_path = try thumb_gen.generateThumbnail(allocator, photo_id, photo_path);
+            defer allocator.free(thumb_path);
+            thumbnail_count += 1;
+        }
+    }
+
+    print("\n📊 Library scan complete:\n", .{});
+    print("  Total photos: {d}\n", .{photo_count});
+    print("  New photos indexed: {d}\n", .{new_photos});
+    print("  Thumbnails generated: {d}\n", .{thumbnail_count});
 }
 
 // Route handlers
@@ -79,7 +173,89 @@ fn staticHandler(req: *httpz.Request, res: *httpz.Response) !void {
     try serveFile(req, res, file_path, content_type);
 }
 
-fn photosHandler(req: *httpz.Request, res: *httpz.Response) !void {
+/// Serve optimized WebP thumbnails with aggressive caching
+fn thumbnailHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const photo_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing photo ID";
+        return;
+    };
+
+    const photo_id = std.fmt.parseInt(i64, photo_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid photo ID";
+        return;
+    };
+
+    const thumb_gen = global_thumbnail_generator orelse {
+        res.status = 500;
+        res.body = "Thumbnail generator not available";
+        return;
+    };
+
+    // Get thumbnail path
+    const thumb_path = try thumb_gen.getThumbnailPath(req.arena, photo_id);
+    defer req.arena.free(thumb_path);
+
+    // Serve thumbnail with aggressive caching (1 year)
+    try serveFileWithCache(req, res, thumb_path, "image/webp", 31536000);
+}
+
+/// Serve full-size photos with caching
+fn fullPhotoHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    const photo_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "Bad Request: Missing photo ID";
+        return;
+    };
+
+    const photo_id = std.fmt.parseInt(i64, photo_id_str, 10) catch {
+        res.status = 400;
+        res.body = "Bad Request: Invalid photo ID";
+        return;
+    };
+
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
+        return;
+    };
+
+    // Get photo path from database
+    const photos = try db.getPhotos(req.arena);
+    defer {
+        for (photos) |photo| {
+            req.arena.free(photo.path);
+            req.arena.free(photo.filename);
+            if (photo.metadata_json) |meta| {
+                req.arena.free(meta);
+            }
+        }
+        req.arena.free(photos);
+    }
+
+    for (photos) |photo| {
+        if (photo.id == photo_id) {
+            // Detect content type from filename
+            const content_type = if (std.mem.endsWith(u8, photo.path, ".png"))
+                "image/png"
+            else if (std.mem.endsWith(u8, photo.path, ".heic") or std.mem.endsWith(u8, photo.path, ".HEIC"))
+                "image/heic"
+            else
+                "image/jpeg";
+
+            // Serve with moderate caching (1 day)
+            try serveFileWithCache(req, res, photo.path, content_type, 86400);
+            return;
+        }
+    }
+
+    res.status = 404;
+    res.body = "Photo not found";
+}
+
+/// Legacy endpoint for backward compatibility
+fn legacyPhotosHandler(req: *httpz.Request, res: *httpz.Response) !void {
     const path = req.url.path;
 
     // Remove "/photos/" prefix to get filename
@@ -89,45 +265,51 @@ fn photosHandler(req: *httpz.Request, res: *httpz.Response) !void {
     try serveFile(req, res, photo_path, "image/jpeg");
 }
 
-fn getPhotosHandler(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
-
-    // Discover photos on-demand
-    var photos = std.ArrayList(std.json.Value).init(res.arena);
-
-    // Scan test_photos directory
-    var dir = std.fs.cwd().openDir("test_photos", .{ .iterate = true }) catch {
-        res.status = 200;
-        try res.json(.{ .photos = photos.items }, .{});
+fn getPhotosHandler(_: *httpz.Request, res: *httpz.Response) !void {
+    const db = global_database orelse {
+        res.status = 500;
+        res.body = "Database not available";
         return;
     };
-    defer dir.close();
 
-    var iterator = dir.iterate();
-    var count: usize = 0;
+    // Get photos from database (already indexed on startup)
+    const db_photos = try db.getPhotos(res.arena);
+    defer {
+        for (db_photos) |photo| {
+            res.arena.free(photo.path);
+            res.arena.free(photo.filename);
+            if (photo.metadata_json) |meta| {
+                res.arena.free(meta);
+            }
+        }
+        res.arena.free(db_photos);
+    }
 
-    while (try iterator.next()) |entry| {
-        if (entry.kind != .file) continue;
-        if (!isImageFile(entry.name)) continue;
+    var photos = std.ArrayList(std.json.Value).init(res.arena);
 
-        count += 1;
-
-        // Create photo object
+    for (db_photos) |db_photo| {
         var photo = std.json.ObjectMap.init(res.arena);
-        try photo.put("id", .{ .integer = @intCast(count) });
-        try photo.put("name", .{ .string = try res.arena.dupe(u8, entry.name) });
 
-        const thumbnail_path = try std.fmt.allocPrint(res.arena, "/photos/{s}", .{entry.name});
-        try photo.put("thumbnail", .{ .string = thumbnail_path });
+        try photo.put("id", .{ .integer = db_photo.id });
+        try photo.put("name", .{ .string = try res.arena.dupe(u8, db_photo.filename) });
 
-        // Extract real photo date from EXIF metadata
-        const photo_path = try std.fmt.allocPrint(res.arena, "test_photos/{s}", .{entry.name});
-        const photo_date = extractPhotoDate(res.arena, photo_path) catch "2024-01-01T12:00:00Z";
+        // Use optimized thumbnail endpoint
+        const thumbnail_url = try std.fmt.allocPrint(res.arena, "/api/thumbnails/{d}", .{db_photo.id});
+        try photo.put("thumbnail", .{ .string = thumbnail_url });
 
-        try photo.put("date", .{ .string = photo_date });
-        // Check if photo is favorited (symlink exists)
-        const is_favorite = isPhotoFavorited(entry.name) catch false;
+        // Use imported_at as date (convert to ISO 8601)
+        const date_str = try std.fmt.allocPrint(res.arena, "{d}", .{db_photo.imported_at});
+        try photo.put("date", .{ .string = date_str });
+
+        // Check if photo is favorited via symlink (fast)
+        const is_favorite = isPhotoFavorited(db_photo.filename) catch false;
         try photo.put("favorite", .{ .bool = is_favorite });
+
+        // Add full image URL for preloading
+        const full_url = try std.fmt.allocPrint(res.arena, "/api/photos/{d}/full", .{db_photo.id});
+        try photo.put("fullUrl", .{ .string = full_url });
+
+        try photo.put("size", .{ .integer = 0 });
 
         try photos.append(.{ .object = photo });
     }
@@ -145,58 +327,6 @@ fn isImageFile(filename: []const u8) bool {
         }
     }
     return false;
-}
-
-// Extract photo date from EXIF metadata using exiftool
-fn extractPhotoDate(allocator: std.mem.Allocator, photo_path: []const u8) ![]const u8 {
-    var arena = std.heap.ArenaAllocator.init(allocator);
-    defer arena.deinit();
-    const arena_allocator = arena.allocator();
-
-    // Prepare exiftool command
-    const cmd = [_][]const u8{ "exiftool", "-DateTimeOriginal", "-CreateDate", "-json", photo_path };
-
-    // Execute exiftool
-    var result = std.process.Child.run(.{
-        .allocator = arena_allocator,
-        .argv = &cmd,
-    }) catch |err| {
-        print("⚠️ Failed to run exiftool for {s}: {}\n", .{photo_path, err});
-        return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
-    };
-
-    if (result.term != .Exited or result.term.Exited != 0) {
-        print("⚠️ exiftool failed for {s}\n", .{photo_path});
-        return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
-    }
-
-    // Parse JSON response to find DateTimeOriginal
-    if (std.mem.indexOf(u8, result.stdout, "\"DateTimeOriginal\"")) |start_idx| {
-        // Find the colon and first quote after it: "DateTimeOriginal": "2025:05:22 11:12:29"
-        if (std.mem.indexOf(u8, result.stdout[start_idx..], ":")) |colon_idx| {
-            const after_colon = start_idx + colon_idx + 1;
-            if (std.mem.indexOf(u8, result.stdout[after_colon..], "\"")) |quote1| {
-                const value_start = after_colon + quote1 + 1;
-                if (std.mem.indexOf(u8, result.stdout[value_start..], "\"")) |quote2| {
-                    const date_str = result.stdout[value_start..value_start + quote2];
-                    // Convert "2025:05:22 11:12:29" to "2025-05-22T11:12:29Z"
-                    if (date_str.len >= 19) {
-                        const iso_date = try std.fmt.allocPrint(allocator, "{s}-{s}-{s}T{s}Z", .{
-                            date_str[0..4],  // year
-                            date_str[5..7],  // month
-                            date_str[8..10], // day
-                            date_str[11..19] // time
-                        });
-                        print("📅 Extracted date for {s}: {s}\n", .{photo_path, iso_date});
-                        return iso_date;
-                    }
-                }
-            }
-        }
-    }
-
-    print("⚠️ No DateTimeOriginal found for {s}, using fallback\n", .{photo_path});
-    return allocator.dupe(u8, "2024-05-22T12:00:00Z"); // Fallback to hardcoded date
 }
 
 // Symlink-based favorites management
@@ -249,49 +379,63 @@ fn removePhotoFromFavorites(photo_name: []const u8) !void {
 }
 
 fn addFavoriteHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    print("🔍 DEBUG: Entered addFavoriteHandler\n", .{});
+
     // Extract photo name from URL path: /api/photos/:name/favorite
     const photo_name = req.param("name") orelse {
+        print("🔍 DEBUG: Missing photo name parameter\n", .{});
         res.status = 400;
         res.body = "Bad Request: Missing photo name";
         return;
     };
 
+    print("🔍 DEBUG: Photo name: {s}\n", .{photo_name});
+
     // Add to favorites
-    addPhotoToFavorites(photo_name) catch {
+    print("🔍 DEBUG: Calling addPhotoToFavorites\n", .{});
+    addPhotoToFavorites(photo_name) catch |err| {
+        print("🔍 DEBUG: addPhotoToFavorites failed with error: {}\n", .{err});
         res.status = 500;
         res.body = "Internal Server Error";
         return;
     };
 
+    print("🔍 DEBUG: Successfully added to favorites, sending JSON response\n", .{});
+
     res.status = 200;
-    try res.json(.{
-        .success = true,
-        .favorite = true,
-        .photo = photo_name
-    }, .{});
+    try res.json(.{ .success = true, .favorite = true, .photo = photo_name }, .{});
+
+    print("🔍 DEBUG: Completed addFavoriteHandler\n", .{});
 }
 
 fn removeFavoriteHandler(req: *httpz.Request, res: *httpz.Response) !void {
+    print("🔍 DEBUG: Entered removeFavoriteHandler\n", .{});
+
     // Extract photo name from URL path: /api/photos/:name/favorite
     const photo_name = req.param("name") orelse {
+        print("🔍 DEBUG: Missing photo name parameter\n", .{});
         res.status = 400;
         res.body = "Bad Request: Missing photo name";
         return;
     };
 
+    print("🔍 DEBUG: Photo name: {s}\n", .{photo_name});
+
     // Remove from favorites
-    removePhotoFromFavorites(photo_name) catch {
+    print("🔍 DEBUG: Calling removePhotoFromFavorites\n", .{});
+    removePhotoFromFavorites(photo_name) catch |err| {
+        print("🔍 DEBUG: removePhotoFromFavorites failed with error: {}\n", .{err});
         res.status = 500;
         res.body = "Internal Server Error";
         return;
     };
 
+    print("🔍 DEBUG: Successfully removed from favorites, sending JSON response\n", .{});
+
     res.status = 200;
-    try res.json(.{
-        .success = true,
-        .favorite = false,
-        .photo = photo_name
-    }, .{});
+    try res.json(.{ .success = true, .favorite = false, .photo = photo_name }, .{});
+
+    print("🔍 DEBUG: Completed removeFavoriteHandler\n", .{});
 }
 
 fn getPeopleHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -352,13 +496,7 @@ fn createPersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
     print("✅ Created person: {s} with ID: {}\n", .{ body.name, person_id });
 
     res.status = 201;
-    try res.json(.{
-        .person = .{
-            .id = person_id,
-            .name = body.name,
-            .photoCount = 0
-        }
-    }, .{});
+    try res.json(.{ .person = .{ .id = person_id, .name = body.name, .photoCount = 0 } }, .{});
 }
 
 fn updatePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -397,13 +535,7 @@ fn updatePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
     print("✅ Updated person ID {}: {s}\n", .{ person_id, body.name });
 
     res.status = 200;
-    try res.json(.{
-        .person = .{
-            .id = person_id,
-            .name = body.name,
-            .photoCount = 0
-        }
-    }, .{});
+    try res.json(.{ .person = .{ .id = person_id, .name = body.name, .photoCount = 0 } }, .{});
 }
 
 fn deletePersonHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -496,15 +628,7 @@ fn createFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
         return;
     };
 
-    const body_result = try req.json(struct {
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-        personId: ?i64,
-        confidence: ?f64,
-        isManual: ?bool
-    });
+    const body_result = try req.json(struct { x: f64, y: f64, width: f64, height: f64, personId: ?i64, confidence: ?f64, isManual: ?bool });
     const body = body_result orelse {
         res.status = 400;
         res.body = "Bad Request";
@@ -520,16 +644,7 @@ fn createFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
     const confidence = body.confidence orelse 1.0;
     const is_manual = body.isManual orelse true;
 
-    const face_tag_id = db.insertFaceTag(
-        photo_filename,
-        body.personId,
-        body.x,
-        body.y,
-        body.width,
-        body.height,
-        confidence,
-        is_manual
-    ) catch |err| {
+    const face_tag_id = db.insertFaceTag(photo_filename, body.personId, body.x, body.y, body.width, body.height, confidence, is_manual) catch |err| {
         print("❌ Error creating face tag: {}\n", .{err});
         res.status = 500;
         res.body = "Failed to create face tag";
@@ -539,18 +654,7 @@ fn createFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
     print("✅ Created face tag for {s} with ID: {}\n", .{ photo_filename, face_tag_id });
 
     res.status = 201;
-    try res.json(.{
-        .faceTag = .{
-            .id = face_tag_id,
-            .x = body.x,
-            .y = body.y,
-            .width = body.width,
-            .height = body.height,
-            .personId = body.personId,
-            .confidence = confidence,
-            .isManual = is_manual
-        }
-    }, .{});
+    try res.json(.{ .faceTag = .{ .id = face_tag_id, .x = body.x, .y = body.y, .width = body.width, .height = body.height, .personId = body.personId, .confidence = confidence, .isManual = is_manual } }, .{});
 }
 
 fn updateFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -566,14 +670,7 @@ fn updateFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
         return;
     };
 
-    const body_result = try req.json(struct {
-        x: f64,
-        y: f64,
-        width: f64,
-        height: f64,
-        personId: ?i64,
-        confidence: ?f64
-    });
+    const body_result = try req.json(struct { x: f64, y: f64, width: f64, height: f64, personId: ?i64, confidence: ?f64 });
     const body = body_result orelse {
         res.status = 400;
         res.body = "Bad Request";
@@ -588,15 +685,7 @@ fn updateFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
 
     const confidence = body.confidence orelse 1.0;
 
-    db.updateFaceTag(
-        face_tag_id,
-        body.personId,
-        body.x,
-        body.y,
-        body.width,
-        body.height,
-        confidence
-    ) catch |err| {
+    db.updateFaceTag(face_tag_id, body.personId, body.x, body.y, body.width, body.height, confidence) catch |err| {
         print("❌ Error updating face tag: {}\n", .{err});
         res.status = 500;
         res.body = "Failed to update face tag";
@@ -606,17 +695,7 @@ fn updateFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
     print("✅ Updated face tag ID {}\n", .{face_tag_id});
 
     res.status = 200;
-    try res.json(.{
-        .faceTag = .{
-            .id = face_tag_id,
-            .x = body.x,
-            .y = body.y,
-            .width = body.width,
-            .height = body.height,
-            .personId = body.personId,
-            .confidence = confidence
-        }
-    }, .{});
+    try res.json(.{ .faceTag = .{ .id = face_tag_id, .x = body.x, .y = body.y, .width = body.width, .height = body.height, .personId = body.personId, .confidence = confidence } }, .{});
 }
 
 fn deleteFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
@@ -651,7 +730,34 @@ fn deleteFaceTagHandler(req: *httpz.Request, res: *httpz.Response) !void {
     try res.json(.{ .success = true }, .{});
 }
 
-// Helper function to serve static files
+// Helper function to serve static files with HTTP caching
+fn serveFileWithCache(req: *httpz.Request, res: *httpz.Response, path: []const u8, content_type: []const u8, max_age_seconds: u32) !void {
+    _ = req;
+
+    const file = std.fs.cwd().openFile(path, .{}) catch {
+        res.status = 404;
+        res.body = "Not Found";
+        return;
+    };
+    defer file.close();
+
+    const file_size = try file.getEndPos();
+    const content = try file.readToEndAlloc(res.arena, file_size);
+
+    // Set aggressive caching headers
+    res.header("content-type", content_type);
+    const cache_control = try std.fmt.allocPrint(res.arena, "public, max-age={d}, immutable", .{max_age_seconds});
+    res.header("cache-control", cache_control);
+
+    // Add ETag for cache validation
+    const stat = try file.stat();
+    const etag = try std.fmt.allocPrint(res.arena, "\"{d}-{d}\"", .{ stat.mtime, stat.size });
+    res.header("etag", etag);
+
+    res.body = content;
+}
+
+// Helper function to serve static files (no caching)
 fn serveFile(req: *httpz.Request, res: *httpz.Response, path: []const u8, content_type: []const u8) !void {
     _ = req;
 
