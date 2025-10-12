@@ -1,9 +1,15 @@
-# Zig build artifacts
+# Zig build artifacts (legacy)
 .zig-cache/
 zig-out/
 
+# Go build artifacts
+tidyphotos-server
+
 # Test photos (contains actual user photos)
 test_photos/
+
+# Cache directory (thumbnails, etc.)
+cache/
 
 # Claude Code settings
 .claude/

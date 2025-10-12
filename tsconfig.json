@@ -4,7 +4,7 @@
     "module": "ES2020",
     "moduleResolution": "node",
     "outDir": "./public/js/dist",
-    "rootDir": "./src/frontend",
+    "rootDir": "./frontend",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -15,7 +15,7 @@
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "src/frontend/**/*"
+    "frontend/**/*"
   ],
   "exclude": [
     "node_modules",

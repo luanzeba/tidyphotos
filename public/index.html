@@ -259,7 +259,7 @@
                         @mousemove="updateDrawingTag($event)"
                         @mouseup="finishDrawingTag($event)">
                         <img
-                            :src="currentPhoto?.thumbnail"
+                            :src="currentPhoto ? `/api/photos/${encodeURIComponent(currentPhoto.name)}` : ''"
                             :alt="currentPhoto?.name"
                             class="full-screen-photo"
                             @click.stop
