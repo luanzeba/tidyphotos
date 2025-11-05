@@ -27,7 +27,6 @@
   "keywords": [
     "photo-management",
     "self-hosted",
-    "zig",
     "alpine-js",
     "typescript"
   ],

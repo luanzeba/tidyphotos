@@ -55,16 +55,15 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("/api/photos", listPhotos(database))
+	mux.HandleFunc("/api/photos/", servePhoto(photosDir))
+
 	mux.HandleFunc("/api/people", handlePeople(database))
 	mux.HandleFunc("/api/people/", handlePersonActions(database))
+
 	mux.HandleFunc("/api/face-tags", handleFaceTags(database))
 	mux.HandleFunc("/api/face-tags/", handleFaceTagActions(database))
 
-	// Thumbnail serving (instant, filesystem-based)
 	mux.HandleFunc("/api/thumbnails/", serveThumbnail(thumbDir))
-
-	// Photo serving (instant, filesystem-based)
-	mux.HandleFunc("/api/photos/", servePhoto(photosDir))
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -184,11 +183,11 @@ func listPhotos(database *db.DB) http.HandlerFunc {
 
 		// Convert to JSON-friendly format matching frontend expectations
 		type PhotoResponse struct {
-			ID        int64  `json:"id"`
-			Name      string `json:"name"`      // Frontend expects 'name' not 'filename'
-			Thumbnail string `json:"thumbnail"` // Frontend expects 'thumbnail' not 'thumbnail_url'
-			Date      string `json:"date"`      // Frontend expects ISO date string
-			Favorite  bool   `json:"favorite"`
+			ID        int64    `json:"id"`
+			Name      string   `json:"name"`      // Frontend expects 'name' not 'filename'
+			Thumbnail string   `json:"thumbnail"` // Frontend expects 'thumbnail' not 'thumbnail_url'
+			Date      string   `json:"date"`      // Frontend expects ISO date string
+			Favorite  bool     `json:"favorite"`
 			Tags      []string `json:"tags,omitempty"`
 		}
 
