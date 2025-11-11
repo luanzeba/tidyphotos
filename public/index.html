@@ -19,6 +19,9 @@
     <!-- Load main app first -->
     <script type="module" src="/js/dist/tidyphotos-app.js"></script>
 
+    <!-- Load self-contained managers -->
+    <script type="module" src="/js/dist/people-manager.js"></script>
+
     <!-- Load Alpine.js after -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
@@ -150,7 +153,7 @@
             </div>
 
             <!-- People View -->
-            <div x-show="currentView === 'people'" class="people-view">
+            <div x-show="currentView === 'people'" class="people-view" x-data="peopleManager()">
                 <!-- People Management Section -->
                 <main class="people-main">
                     <div class="people-header">
@@ -204,6 +207,37 @@
                         </div>
                     </div>
                 </main>
+
+                <!-- Add/Edit Person Modal (inside people-view scope) -->
+                <div x-show="showAddPersonModal || showEditPersonModal" class="modal-overlay" @click.self="closePersonModal()">
+                    <div class="modal">
+                        <div class="modal-header">
+                            <h3 x-text="showAddPersonModal ? 'Add Person' : 'Edit Person'"></h3>
+                            <button @click="closePersonModal()" class="close-btn">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <form @submit.prevent="showAddPersonModal ? addPerson() : updatePerson()">
+                                <div class="form-group">
+                                    <label for="person-name">Name</label>
+                                    <input
+                                        type="text"
+                                        id="person-name"
+                                        x-model="personForm.name"
+                                        placeholder="Enter person's name"
+                                        required>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="button" @click="closePersonModal()" class="btn-secondary">
+                                        Cancel
+                                    </button>
+                                    <button type="submit" class="btn-primary">
+                                        <span x-text="showAddPersonModal ? 'Add Person' : 'Update Person'"></span>
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -332,37 +366,6 @@
                 </button>
             </div>
 
-        </div>
-
-        <!-- Add/Edit Person Modal -->
-        <div x-show="showAddPersonModal || showEditPersonModal" class="modal-overlay" @click.self="closePersonModal()">
-            <div class="modal">
-                <div class="modal-header">
-                    <h3 x-text="showAddPersonModal ? 'Add Person' : 'Edit Person'"></h3>
-                    <button @click="closePersonModal()" class="close-btn">✕</button>
-                </div>
-                <div class="modal-body">
-                    <form @submit.prevent="showAddPersonModal ? addPerson() : updatePerson()">
-                        <div class="form-group">
-                            <label for="person-name">Name</label>
-                            <input
-                                type="text"
-                                id="person-name"
-                                x-model="personForm.name"
-                                placeholder="Enter person's name"
-                                required>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" @click="closePersonModal()" class="btn-secondary">
-                                Cancel
-                            </button>
-                            <button type="submit" class="btn-primary">
-                                <span x-text="showAddPersonModal ? 'Add Person' : 'Update Person'"></span>
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
         </div>
 
         <!-- Tag Assignment Modal -->

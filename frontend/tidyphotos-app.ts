@@ -1,552 +1,588 @@
-import { Photo, Month, MobileTimelineView, Person } from './types.js';
-import { PhotoManager } from './photo-manager.js';
-import { TimelineManager } from './timeline-manager.js';
-import { Router } from './router.js';
-import { FullscreenViewer } from './fullscreen-viewer.js';
-import { KeyboardHandler } from './keyboard-handler.js';
-import { PeopleManager } from './people-manager.js';
+import { Photo, Month, MobileTimelineView, Person } from "./types.js";
+import { Router } from "./router.js";
+import { FullscreenViewer } from "./fullscreen-viewer.js";
+import { KeyboardHandler } from "./keyboard-handler.js";
 
+// Helper functions for timeline filtering (extracted from TimelineManager)
+function getYears(photos: Photo[]): number[] {
+  const yearSet = new Set<number>();
+  photos.forEach((photo) => {
+    const date = new Date(photo.date);
+    yearSet.add(date.getFullYear());
+  });
+  return Array.from(yearSet).sort((a, b) => b - a);
+}
+
+function getMonths(photos: Photo[], selectedYear: number | null): Month[] {
+  if (!selectedYear) return [];
+
+  const monthNames: string[] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const monthSet = new Set<number>();
+  photos.forEach((photo) => {
+    const date = new Date(photo.date);
+    if (date.getFullYear() === selectedYear) {
+      monthSet.add(date.getMonth());
+    }
+  });
+
+  return Array.from(monthSet)
+    .sort((a, b) => b - a)
+    .map((month) => ({
+      number: month,
+      name: monthNames[month],
+    }));
+}
+
+function filterPhotos(
+  photos: Photo[],
+  searchQuery: string,
+  selectedYear: number | null,
+  selectedMonth: number | null,
+): Photo[] {
+  let filtered = photos;
+
+  // Filter by search query
+  if (searchQuery) {
+    const query = searchQuery.toLowerCase();
+    filtered = filtered.filter(
+      (photo) =>
+        photo.name.toLowerCase().includes(query) ||
+        photo.tags?.some((tag) => tag.toLowerCase().includes(query)),
+    );
+  }
+
+  // Filter by timeline selection
+  if (selectedYear) {
+    filtered = filtered.filter((photo) => {
+      const date = new Date(photo.date);
+      const yearMatch = date.getFullYear() === selectedYear;
+
+      if (selectedMonth !== null) {
+        return yearMatch && date.getMonth() === selectedMonth;
+      }
+      return yearMatch;
+    });
+  }
+
+  return filtered.sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function generateMockPhotos(): Photo[] {
+  const photos: Photo[] = [];
+  const currentDate = new Date();
+
+  for (let i = 0; i < 50; i++) {
+    const date = new Date(currentDate);
+    date.setDate(date.getDate() - Math.floor(Math.random() * 365));
+
+    photos.push({
+      id: i + 1,
+      name: `Photo ${i + 1}`,
+      thumbnail: `https://picsum.photos/300/300?random=${i}`,
+      date: date.toISOString(),
+      favorite: Math.random() > 0.8,
+      tags:
+        Math.random() > 0.7
+          ? [["family", "vacation", "nature"][Math.floor(Math.random() * 3)]]
+          : undefined,
+    });
+  }
+
+  return photos;
+}
+
+// Alpine.js compatibility class for components that need instance methods
+// This is a minimal shim that allows existing components to work while
+// the actual state is managed by Alpine.js reactive data
 export class TidyPhotosApp {
-    private photoManager: PhotoManager;
-    private timelineManager: TimelineManager;
-    private peopleManager: PeopleManager;
-    private viewer: FullscreenViewer;
-    private keyboardHandler: KeyboardHandler;
-    private router: Router;
+  viewer: FullscreenViewer;
+  keyboardHandler: KeyboardHandler;
+  router: Router;
 
-    // App state
-    private _searchQuery: string = '';
-    private selectedPhotoId: number | null = null;
-    private currentGallery: string = 'all';
-    private _currentView: 'photos' | 'people' = 'photos';
+  // Reference to Alpine data (set after creation)
+  private alpineData: any = null;
 
-    constructor() {
-        // Initialize managers
-        this.photoManager = new PhotoManager();
-        this.timelineManager = new TimelineManager();
-        this.peopleManager = new PeopleManager();
-        this.viewer = new FullscreenViewer(this);
-        this.keyboardHandler = new KeyboardHandler(this);
-        this.router = new Router(this);
+  constructor() {
+    this.viewer = new FullscreenViewer(this);
+    this.keyboardHandler = new KeyboardHandler(this);
+    this.router = new Router(this);
+  }
+
+  setAlpineData(data: any): void {
+    this.alpineData = data;
+  }
+
+  // Component getters
+  getViewer(): FullscreenViewer {
+    return this.viewer;
+  }
+
+  getKeyboardHandler(): KeyboardHandler {
+    return this.keyboardHandler;
+  }
+
+  getRouter(): Router {
+    return this.router;
+  }
+
+  // Compatibility methods that delegate to Alpine data
+  getCurrentGallery(): string {
+    return "all";
+  }
+
+  get currentSelectedPhotoId(): number | null {
+    return this.alpineData?.selectedPhotoId ?? null;
+  }
+
+  get fullScreenMode(): boolean {
+    return this.viewer.isFullScreen;
+  }
+
+  get currentPhoto(): Photo | null {
+    return this.viewer.currentPhoto;
+  }
+
+  getCurrentView(): string {
+    return this.alpineData?.currentView ?? "photos";
+  }
+
+  getSelectedPhotoId(): number | null {
+    return this.alpineData?.selectedPhotoId ?? null;
+  }
+
+  getFilteredPhotos(): Photo[] {
+    if (!this.alpineData) return [];
+    return filterPhotos(
+      this.alpineData.photos,
+      this.alpineData.searchQuery,
+      this.alpineData.selectedYear,
+      this.alpineData.selectedMonth,
+    );
+  }
+
+  // Methods that mutate Alpine state
+  selectPhoto(photoId: number): void {
+    if (this.alpineData) {
+      this.alpineData.selectedPhotoId = photoId;
     }
+  }
 
-    // Public getters for internal components
-    getPhotoManager(): PhotoManager {
-        return this.photoManager;
+  setSelectedPhotoId(photoId: number | null): void {
+    if (this.alpineData) {
+      this.alpineData.selectedPhotoId = photoId;
     }
+  }
 
-    getTimelineManager(): TimelineManager {
-        return this.timelineManager;
+  setCurrentGallery(_gallery: string): void {
+    // Gallery system is unused, no-op
+  }
+
+  setCurrentView(view: "photos" | "people"): void {
+    if (this.alpineData) {
+      this.alpineData.currentView = view;
     }
+  }
 
-    getPeopleManager(): PeopleManager {
-        return this.peopleManager;
+  setFullScreenMode(fullScreen: boolean): void {
+    if (!fullScreen) {
+      this.viewer.closeFullScreen();
     }
+  }
 
-    getViewer(): FullscreenViewer {
-        return this.viewer;
+  closeFullScreen(): void {
+    this.viewer.closeFullScreen();
+    if (this.alpineData) {
+      this.alpineData.syncViewerState();
     }
+  }
 
-    getKeyboardHandler(): KeyboardHandler {
-        return this.keyboardHandler;
+  openFullScreenFromRoute(photoId: number): void {
+    this.viewer.openFullScreenFromRoute(photoId);
+    if (this.alpineData) {
+      this.alpineData.syncViewerState();
     }
+  }
 
-    getRouter(): Router {
-        return this.router;
+  async toggleFavorite(photoId: number): Promise<void> {
+    if (this.alpineData) {
+      await this.alpineData.toggleFavorite(photoId);
     }
+  }
 
-    // State getters
-    getSelectedPhotoId(): number | null {
-        return this.selectedPhotoId;
-    }
+  scrollSelectedIntoView(): void {
+    setTimeout(() => {
+      const selectedElement = document.querySelector(".photo-item.selected");
+      if (selectedElement) {
+        selectedElement.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }
+    }, 0);
+  }
 
-    // Public accessor for selectedPhotoId
-    public get currentSelectedPhotoId(): number | null {
-        return this.selectedPhotoId;
-    }
+  // Stub for legacy PhotoManager interface
+  getPhotoManager(): any {
+    return {
+      allPhotos: this.alpineData?.photos ?? [],
+      toggleFavorite: (photoId: number) => this.toggleFavorite(photoId),
+    };
+  }
+}
 
-    getCurrentGallery(): string {
-        return this.currentGallery;
-    }
+// Factory function for Alpine.js
+declare global {
+  interface Window {
+    photoApp(): any;
+  }
+}
 
-    getCurrentView(): 'photos' | 'people' {
-        return this._currentView;
-    }
+let appInstance: TidyPhotosApp | null = null;
 
-    getFilteredPhotos(): Photo[] {
-        return this.timelineManager.filterPhotos(this.photoManager.allPhotos, this._searchQuery);
-    }
+window.photoApp = function(): any {
+  if (!appInstance) {
+    appInstance = new TidyPhotosApp();
+  }
 
-    // State setters
-    setSelectedPhotoId(photoId: number | null): void {
-        this.selectedPhotoId = photoId;
-    }
+  // Return pure Alpine.js reactive data object
+  const alpineData = {
+    // Photo data (reactive)
+    photos: [] as Photo[],
+    loading: true,
 
-    setCurrentGallery(gallery: string): void {
-        this.currentGallery = gallery;
-    }
+    // Timeline state (reactive)
+    selectedYear: null as number | null,
+    selectedMonth: null as number | null,
+    mobileTimelineView: "all" as MobileTimelineView,
 
-    setFullScreenMode(fullScreen: boolean): void {
-        // This method exists for Router compatibility
-        if (!fullScreen) {
-            this.viewer.closeFullScreen();
-        }
-    }
+    // UI state (reactive)
+    searchQuery: "",
+    selectedPhotoId: null as number | null,
+    currentView: "photos" as "photos" | "people",
+    thumbnailSize: 200,
 
-    setSearchQuery(query: string): void {
-        this._searchQuery = query;
-    }
+    // Fullscreen state (reactive - synced with viewer)
+    fullScreenMode: false,
+    currentPhoto: null as Photo | null,
+    currentPhotoIndex: 0,
 
-    setCurrentView(view: 'photos' | 'people'): void {
-        this._currentView = view;
-    }
+    // Face tagging state (reactive - synced with viewer)
+    taggingMode: false,
+    faceTags: [] as any[],
+    showTagAssignModal: false,
+    selectedTagId: null as number | null,
+    isDrawingTag: false,
+    drawingPreview: null as any,
 
-    // Computed properties (getters) for Alpine.js compatibility
-    get loading(): boolean {
-        return this.photoManager.isLoading;
-    }
-
-    get photos(): Photo[] {
-        return this.photoManager.allPhotos;
-    }
-
+    // Computed properties
     get years(): number[] {
-        return this.timelineManager.getYears(this.photos);
-    }
+      return getYears(this.photos);
+    },
 
     get months(): Month[] {
-        return this.timelineManager.getMonths(this.photos, this.timelineManager.currentSelectedYear);
-    }
+      return getMonths(this.photos, this.selectedYear);
+    },
 
     get filteredPhotos(): Photo[] {
-        return this.getFilteredPhotos();
-    }
-
-    get fullScreenMode(): boolean {
-        return this.viewer.isFullScreen;
-    }
-
-    get currentPhoto(): Photo | null {
-        return this.viewer.currentPhoto;
-    }
-
-    get currentPhotoIndex(): number {
-        return this.viewer.photoIndex;
-    }
-
-    get selectedYear(): number | null {
-        return this.timelineManager.currentSelectedYear;
-    }
-
-    get selectedMonth(): number | null {
-        return this.timelineManager.currentSelectedMonth;
-    }
-
-    get mobileTimelineView(): MobileTimelineView {
-        return this.timelineManager.currentMobileView;
-    }
-
-    get searchQuery(): string {
-        return this._searchQuery;
-    }
-
-    set searchQuery(value: string) {
-        this.setSearchQuery(value);
-    }
-
-    get currentView(): 'photos' | 'people' {
-        return this._currentView;
-    }
-
-    get people(): Person[] {
-        return this.peopleManager.people;
-    }
-
-    get taggingMode(): boolean {
-        return this.viewer.isTaggingMode;
-    }
-
-    get faceTags(): any[] {
-        return this.viewer.faceTags;
-    }
-
-    get isDrawingTag(): boolean {
-        return this.viewer.isDrawing;
-    }
-
-    get drawingPreview(): any {
-        return this.viewer.drawingPreview;
-    }
+      return filterPhotos(
+        this.photos,
+        this.searchQuery,
+        this.selectedYear,
+        this.selectedMonth,
+      );
+    },
 
     // Initialization
-    async init(): Promise<void> {
-        console.log('🚀 TidyPhotos: Initializing...');
-        await Promise.all([
-            this.photoManager.loadPhotos(),
-            this.peopleManager.loadPeople()
-        ]);
-        this.router.handleInitialRoute();
-        console.log('✅ TidyPhotos: Initialization complete');
-    }
+    async init() {
+      console.log("🚀 TidyPhotos: Initializing...");
+
+      // Load thumbnail size from localStorage
+      const savedSize = localStorage.getItem("tidyphotos-thumbnail-size");
+      if (savedSize) {
+        this.thumbnailSize = parseInt(savedSize);
+        document.documentElement.style.setProperty(
+          "--thumbnail-size",
+          savedSize + "px",
+        );
+      }
+
+      // Load photos from API
+      await this.loadPhotos();
+
+      // Initialize router
+      appInstance!.router.handleInitialRoute();
+
+      console.log("✅ TidyPhotos: Initialization complete");
+    },
+
+    // Photo loading
+    async loadPhotos() {
+      console.log("📡 TidyPhotos: Loading photos from API...");
+      try {
+        const response = await fetch("/api/photos");
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(
+            `API error: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        this.photos = data as Photo[];
+        this.loading = false;
+        console.log("✅ TidyPhotos: Photos loaded successfully");
+      } catch (error) {
+        console.error("❌ TidyPhotos: Failed to load photos:", error);
+        this.photos = generateMockPhotos();
+        this.loading = false;
+      }
+    },
 
     // Photo selection
-    selectPhoto(photoId: number): void {
-        this.selectedPhotoId = photoId;
-    }
+    selectPhoto(photoId: number) {
+      this.selectedPhotoId = photoId;
+    },
 
     // Timeline methods
-    selectYear(year: number): void {
-        this.timelineManager.selectYear(year);
-    }
+    selectYear(year: number) {
+      this.selectedYear = year;
+      this.selectedMonth = null;
+    },
 
-    selectMonth(month: number): void {
-        this.timelineManager.selectMonth(month);
-    }
+    selectMonth(month: number) {
+      this.selectedMonth = month;
+    },
 
-    clearFilters(): void {
-        this.timelineManager.clearFilters();
-    }
+    clearFilters() {
+      this.selectedYear = null;
+      this.selectedMonth = null;
+    },
 
-    setMobileView(view: MobileTimelineView): void {
-        this.timelineManager.setMobileView(view);
-    }
+    setMobileView(view: MobileTimelineView) {
+      this.mobileTimelineView = view;
+      if (view === "all") {
+        this.selectedYear = null;
+        this.selectedMonth = null;
+      }
+    },
 
-    // Photo methods
-    async toggleFavorite(photoId: number): Promise<void> {
-        await this.photoManager.toggleFavorite(photoId);
-    }
+    // Photo operations
+    async toggleFavorite(photoId: number) {
+      const photo = this.photos.find((p: Photo) => p.id === photoId);
+      console.log(
+        "⭐ TidyPhotos: Toggling favorite for photo ID",
+        photoId,
+        "favorite:",
+        photo?.favorite,
+      );
+
+      if (photo) {
+        const originalState = photo.favorite;
+        const newFavoriteState = !originalState;
+
+        // Optimistic update: Update UI immediately
+        photo.favorite = newFavoriteState;
+        console.log(
+          `🚀 Optimistic update: ${newFavoriteState ? "adding" : "removing"} favorite for ${photo.name}`,
+        );
+
+        try {
+          // Call API to persist the change
+          const method = newFavoriteState ? "PUT" : "DELETE";
+          const response = await fetch(
+            `/api/photos/${encodeURIComponent(photo.name)}/favorite`,
+            {
+              method: method,
+            },
+          );
+
+          if (response.ok) {
+            // API call succeeded - optimistic update was correct
+            console.log(
+              `✅ Successfully ${newFavoriteState ? "added" : "removed"} favorite for ${photo.name}`,
+            );
+          } else {
+            // API call failed - revert the optimistic update
+            photo.favorite = originalState;
+            console.error(
+              `❌ Failed to ${newFavoriteState ? "add" : "remove"} favorite, reverting UI:`,
+              response.status,
+              response.statusText,
+            );
+          }
+        } catch (error) {
+          // Network error - revert the optimistic update
+          photo.favorite = originalState;
+          console.error(
+            "❌ Network error while updating favorite, reverting UI:",
+            error,
+          );
+        }
+      }
+    },
 
     formatDate(dateString: string): string {
-        return this.photoManager.formatDate(dateString);
-    }
+      return formatDate(dateString);
+    },
 
     // Fullscreen methods
-    async openFullScreen(photoId: number): Promise<void> {
-        await this.viewer.openFullScreen(photoId);
-    }
+    async openFullScreen(photoId: number) {
+      await appInstance!.viewer.openFullScreen(photoId);
+      this.syncViewerState();
+    },
 
-    openFullScreenFromRoute(photoId: number): void {
-        this.viewer.openFullScreenFromRoute(photoId);
-    }
+    openFullScreenFromRoute(photoId: number) {
+      appInstance!.viewer.openFullScreenFromRoute(photoId);
+      this.syncViewerState();
+    },
 
-    closeFullScreen(): void {
-        this.viewer.closeFullScreen();
-    }
+    closeFullScreen() {
+      appInstance!.viewer.closeFullScreen();
+      this.syncViewerState();
+    },
 
-    async nextPhoto(): Promise<void> {
-        await this.viewer.nextPhoto();
-    }
+    async nextPhoto() {
+      await appInstance!.viewer.nextPhoto();
+      this.syncViewerState();
+    },
 
-    async previousPhoto(): Promise<void> {
-        await this.viewer.previousPhoto();
-    }
+    async previousPhoto() {
+      await appInstance!.viewer.previousPhoto();
+      this.syncViewerState();
+    },
 
-    async toggleFullScreenFavorite(): Promise<void> {
-        await this.viewer.toggleFavorite();
-    }
+    async toggleFullScreenFavorite() {
+      await appInstance!.viewer.toggleFavorite();
+      this.syncViewerState();
+      // Also update the photo in the main photos array
+      await this.loadPhotos();
+    },
 
-    // Keyboard event handlers
-    handleKeyboard(event: KeyboardEvent): void {
-        this.keyboardHandler.handleGalleryKeyboard(event);
-    }
+    // Sync viewer state to Alpine reactive properties
+    syncViewerState() {
+      this.fullScreenMode = appInstance!.viewer.isFullScreen;
+      this.currentPhoto = appInstance!.viewer.currentPhoto
+        ? { ...appInstance!.viewer.currentPhoto }
+        : null;
+      this.currentPhotoIndex = appInstance!.viewer.photoIndex;
+      this.taggingMode = appInstance!.viewer.isTaggingMode;
+      this.faceTags = appInstance!.viewer.faceTags.map((tag) => ({ ...tag }));
+      this.isDrawingTag = appInstance!.viewer.isDrawing;
+      this.drawingPreview = appInstance!.viewer.drawingPreview
+        ? { ...appInstance!.viewer.drawingPreview }
+        : null;
+    },
 
-    handleFullScreenKeyboard(event: KeyboardEvent): void {
-        this.viewer.handleKeyboard(event);
-    }
+    // Keyboard handlers
+    handleKeyboard(event: KeyboardEvent) {
+      appInstance!.keyboardHandler.handleGalleryKeyboard(event);
+      this.syncViewerState();
+    },
 
-    // People management methods
-    async addPerson(name: string): Promise<Person | null> {
-        return await this.peopleManager.addPerson(name);
-    }
+    handleFullScreenKeyboard(event: KeyboardEvent) {
+      appInstance!.viewer.handleKeyboard(event);
+      this.syncViewerState();
+    },
 
-    async updatePerson(id: number, name: string): Promise<boolean> {
-        return await this.peopleManager.updatePerson(id, name);
-    }
+    // Thumbnail size
+    updateThumbnailSize(size: string) {
+      this.thumbnailSize = parseInt(size);
+      document.documentElement.style.setProperty(
+        "--thumbnail-size",
+        size + "px",
+      );
+      localStorage.setItem("tidyphotos-thumbnail-size", size);
+    },
 
-    async deletePerson(id: number): Promise<boolean> {
-        return await this.peopleManager.deletePerson(id);
-    }
+    // View management
+    setCurrentView(view: "photos" | "people") {
+      this.currentView = view;
+      // Update URL when view changes
+      appInstance!
+        .getRouter()
+        .updateUrl(this.fullScreenMode, "all", this.currentPhoto);
+    },
 
-    // Face tagging methods removed - Alpine.js wrappers now call viewer directly
+    // Face tagging methods
+    toggleTaggingMode() {
+      appInstance!.viewer.toggleTaggingMode();
+      this.syncViewerState();
+    },
 
-    // Alpine.js compatibility methods
-    scrollSelectedIntoView(): void {
-        // Use setTimeout to simulate $nextTick
-        setTimeout(() => {
-            const selectedElement = document.querySelector('.photo-item.selected');
-            if (selectedElement) {
-                selectedElement.scrollIntoView({ 
-                    behavior: 'smooth', 
-                    block: 'nearest' 
-                });
-            }
-        }, 0);
-    }
-}
+    startDrawingTag(event: MouseEvent) {
+      appInstance!.viewer.startDrawingTag(event);
+      this.syncViewerState();
+    },
 
-// Factory function for Alpine.js compatibility
-declare global {
-    interface Window {
-        photoApp(): TidyPhotosApp;
-    }
-}
+    updateDrawingTag(event: MouseEvent) {
+      appInstance!.viewer.updateDrawingTag(event);
+      this.syncViewerState();
+    },
 
-// Create a single instance to avoid circular references
-let appInstance: TidyPhotosApp | null = null;
-let dataWrapper: any = null;
+    finishDrawingTag(event: MouseEvent) {
+      appInstance!.viewer.finishDrawingTag(event);
+      this.syncViewerState();
+    },
 
-// Ensure photoApp is available globally as soon as this module loads
-window.photoApp = function(): any {
-    if (!appInstance) {
-        appInstance = new TidyPhotosApp();
-    }
+    removeTag(tagId: number) {
+      appInstance!.viewer.removeTag(tagId);
+      this.syncViewerState();
+    },
 
-    if (!dataWrapper) {
-        // Return a plain object with methods bound to the instance
-        // This prevents Alpine.js from trying to make getters reactive
-        dataWrapper = {
-        // Data properties (copied values, not reactive getters)
-        loading: false,
-        searchQuery: '',
-        selectedPhotoId: null,
-        selectedYear: null,
-        selectedMonth: null,
-        mobileTimelineView: 'all',
-        fullScreenMode: false,
-        currentPhoto: null,
-        currentPhotoIndex: 0,
-        photos: [],
-        years: [],
-        months: [],
-        filteredPhotos: [],
-        thumbnailSize: 200,
-        currentView: 'photos',
-        people: [],
-        showAddPersonModal: false,
-        showEditPersonModal: false,
-        personForm: { id: null, name: '' },
-        taggingMode: false,
-        faceTags: [],
-        showTagAssignModal: false,
-        selectedTagId: null,
-        isDrawingTag: false,
-        drawingPreview: null,
+    openTagAssignModal(tagId: number) {
+      this.selectedTagId = tagId;
+      this.showTagAssignModal = true;
+    },
 
-        // Initialization
-        async init() {
-            // Load thumbnail size from localStorage
-            const savedSize = localStorage.getItem('tidyphotos-thumbnail-size');
-            if (savedSize) {
-                this.thumbnailSize = parseInt(savedSize);
-                document.documentElement.style.setProperty('--thumbnail-size', savedSize + 'px');
-            }
+    assignPersonToTag(personId: number, personName: string) {
+      if (this.selectedTagId) {
+        appInstance!.viewer.assignPersonToTag(
+          this.selectedTagId,
+          personId,
+          personName,
+        );
+        this.closeTagAssignModal();
+        this.syncViewerState();
+      }
+    },
 
-            await appInstance!.init();
-            this.updateData();
-        },
+    closeTagAssignModal() {
+      this.showTagAssignModal = false;
+      this.selectedTagId = null;
+    },
 
-        // Update data from the app instance
-        updateData() {
-            this.loading = appInstance!.loading;
-            this.searchQuery = appInstance!.searchQuery;
-            this.selectedPhotoId = appInstance!.currentSelectedPhotoId;
-            this.selectedYear = appInstance!.selectedYear;
-            this.selectedMonth = appInstance!.selectedMonth;
-            this.mobileTimelineView = appInstance!.mobileTimelineView;
-            this.fullScreenMode = appInstance!.fullScreenMode;
-            this.currentPhoto = appInstance!.currentPhoto ? { ...appInstance!.currentPhoto } : null;
-            this.currentPhotoIndex = appInstance!.currentPhotoIndex;
-            this.photos = appInstance!.photos.map(photo => ({ ...photo }));
-            this.years = appInstance!.years;
-            this.months = appInstance!.months;
-            this.filteredPhotos = appInstance!.filteredPhotos.map(photo => ({ ...photo }));
-            this.currentView = appInstance!.currentView;
-            this.people = appInstance!.people.map(person => ({ ...person }));
-            this.taggingMode = appInstance!.taggingMode;
-            this.faceTags = appInstance!.faceTags.map(tag => ({ ...tag }));
-            this.isDrawingTag = appInstance!.isDrawingTag;
-            this.drawingPreview = appInstance!.drawingPreview ? { ...appInstance!.drawingPreview } : null;
-        },
+    async saveFaceTags() {
+      await appInstance!.viewer.saveFaceTags();
+      this.syncViewerState();
+    },
+  };
 
-        // Methods (bound to the instance)
-        selectPhoto(photoId: number) {
-            appInstance!.selectPhoto(photoId);
-            this.updateData();
-        },
+  // Connect Alpine data to app instance for compatibility
+  appInstance.setAlpineData(alpineData);
 
-        selectYear(year: number) {
-            appInstance!.selectYear(year);
-            this.updateData();
-        },
-
-        selectMonth(month: number) {
-            appInstance!.selectMonth(month);
-            this.updateData();
-        },
-
-        clearFilters() {
-            appInstance!.clearFilters();
-            this.updateData();
-        },
-
-        setMobileView(view: string) {
-            appInstance!.setMobileView(view as any);
-            this.updateData();
-        },
-
-        async toggleFavorite(photoId: number) {
-            await appInstance!.toggleFavorite(photoId);
-            this.updateData();
-        },
-
-        async openFullScreen(photoId: number) {
-            await appInstance!.openFullScreen(photoId);
-            this.updateData();
-        },
-
-        closeFullScreen() {
-            appInstance!.closeFullScreen();
-            this.updateData();
-        },
-
-        async nextPhoto() {
-            await appInstance!.nextPhoto();
-            this.updateData();
-        },
-
-        async previousPhoto() {
-            await appInstance!.previousPhoto();
-            this.updateData();
-        },
-
-        async toggleFullScreenFavorite() {
-            await appInstance!.toggleFullScreenFavorite();
-            this.updateData();
-        },
-
-        handleKeyboard(event: KeyboardEvent) {
-            appInstance!.handleKeyboard(event);
-            this.updateData();
-        },
-
-        handleFullScreenKeyboard(event: KeyboardEvent) {
-            appInstance!.handleFullScreenKeyboard(event);
-            this.updateData();
-        },
-
-        updateThumbnailSize(size: string) {
-            this.thumbnailSize = parseInt(size);
-            // Update CSS custom property
-            document.documentElement.style.setProperty('--thumbnail-size', size + 'px');
-            // Save to localStorage for persistence
-            localStorage.setItem('tidyphotos-thumbnail-size', size);
-        },
-
-        // View management
-        setCurrentView(view: string) {
-            appInstance!.setCurrentView(view as any);
-            this.updateData();
-            // Update URL when view changes
-            appInstance!.getRouter().updateUrl(
-                appInstance!.fullScreenMode,
-                appInstance!.getCurrentGallery(),
-                appInstance!.currentPhoto
-            );
-        },
-
-        // People management
-        async addPerson() {
-            if (this.personForm.name.trim()) {
-                const result = await appInstance!.addPerson(this.personForm.name.trim());
-                if (result) {
-                    this.closePersonModal();
-                    this.updateData();
-                }
-            }
-        },
-
-        async updatePerson() {
-            if (this.personForm.id && this.personForm.name.trim()) {
-                const result = await appInstance!.updatePerson(this.personForm.id, this.personForm.name.trim());
-                if (result) {
-                    this.closePersonModal();
-                    this.updateData();
-                }
-            }
-        },
-
-        editPerson(person: any) {
-            this.personForm.id = person.id;
-            this.personForm.name = person.name;
-            this.showEditPersonModal = true;
-        },
-
-        async deletePerson(person: any) {
-            if (confirm(`Are you sure you want to delete "${person.name}"? This will remove all associated photo tags.`)) {
-                const result = await appInstance!.deletePerson(person.id);
-                if (result) {
-                    this.updateData();
-                }
-            }
-        },
-
-        closePersonModal() {
-            this.showAddPersonModal = false;
-            this.showEditPersonModal = false;
-            this.personForm.id = null;
-            this.personForm.name = '';
-        },
-
-        // Face tagging methods - call FullscreenViewer directly
-        toggleTaggingMode() {
-            appInstance!.getViewer().toggleTaggingMode();
-            this.updateData();
-        },
-
-        startDrawingTag(event: MouseEvent) {
-            appInstance!.getViewer().startDrawingTag(event);
-            this.updateData();
-        },
-
-        updateDrawingTag(event: MouseEvent) {
-            appInstance!.getViewer().updateDrawingTag(event);
-            this.updateData();
-        },
-
-        finishDrawingTag(event: MouseEvent) {
-            appInstance!.getViewer().finishDrawingTag(event);
-            this.updateData();
-        },
-
-        removeTag(tagId: number) {
-            appInstance!.getViewer().removeTag(tagId);
-            this.updateData();
-        },
-
-        openTagAssignModal(tagId: number) {
-            this.selectedTagId = tagId;
-            this.showTagAssignModal = true;
-        },
-
-        assignPersonToTag(personId: number, personName: string) {
-            if (this.selectedTagId) {
-                appInstance!.getViewer().assignPersonToTag(this.selectedTagId, personId, personName);
-                this.closeTagAssignModal();
-                this.updateData();
-            }
-        },
-
-        closeTagAssignModal() {
-            this.showTagAssignModal = false;
-            this.selectedTagId = null;
-        },
-
-        async saveFaceTags() {
-            await appInstance!.getViewer().saveFaceTags();
-            this.updateData();
-        }
-        };
-    }
-
-    return dataWrapper;
+  return alpineData;
 };
