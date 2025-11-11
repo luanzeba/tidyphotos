@@ -10,6 +10,11 @@
         console.log('🔧 TidyPhotos: Script loading...');
         document.addEventListener('alpine:init', () => {
             console.log('🏔️ Alpine.js: Initialized');
+
+            // Set up Alpine global store for app state
+            Alpine.store('app', {
+                currentView: 'photos'
+            });
         });
         window.addEventListener('load', () => {
             console.log('🌍 TidyPhotos: Page loaded, Alpine available:', !!window.Alpine);
@@ -34,19 +39,19 @@
                 <nav class="nav-tabs">
                     <button
                         @click="setCurrentView('photos')"
-                        :class="{ active: currentView === 'photos' }"
+                        :class="{ active: $store.app.currentView === 'photos' }"
                         class="nav-tab">
                         Photos
                     </button>
                     <button
                         @click="setCurrentView('people')"
-                        :class="{ active: currentView === 'people' }"
+                        :class="{ active: $store.app.currentView === 'people' }"
                         class="nav-tab">
                         People
                     </button>
                 </nav>
             </div>
-            <div class="controls" x-show="currentView === 'photos'">
+            <div class="controls" x-show="$store.app.currentView === 'photos'">
                 <div class="thumbnail-size-control">
                     <label for="thumbnail-size">Size:</label>
                     <input
@@ -66,7 +71,7 @@
 
         <div class="main-layout">
             <!-- Photos View -->
-            <div x-show="currentView === 'photos'" class="photos-view">
+            <div x-show="$store.app.currentView === 'photos'" class="photos-view">
                 <!-- Left Sidebar Timeline -->
                 <aside class="timeline-sidebar">
                 <div class="timeline-section">
@@ -153,7 +158,7 @@
             </div>
 
             <!-- People View -->
-            <div x-show="currentView === 'people'" class="people-view" x-data="peopleManager()">
+            <div x-show="$store.app.currentView === 'people'" class="people-view" x-data="peopleManager()" x-init="init()">
                 <!-- People Management Section -->
                 <main class="people-main">
                     <div class="people-header">

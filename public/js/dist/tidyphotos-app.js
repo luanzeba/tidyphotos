@@ -127,7 +127,10 @@ export class TidyPhotosApp {
         return this.viewer.currentPhoto;
     }
     getCurrentView() {
-        return this.alpineData?.currentView ?? "photos";
+        if (typeof Alpine !== 'undefined') {
+            return Alpine.store('app').currentView;
+        }
+        return "photos";
     }
     getSelectedPhotoId() {
         return this.alpineData?.selectedPhotoId ?? null;
@@ -152,8 +155,9 @@ export class TidyPhotosApp {
         // Gallery system is unused, no-op
     }
     setCurrentView(view) {
-        if (this.alpineData) {
-            this.alpineData.currentView = view;
+        // Use Alpine.store for global state management
+        if (typeof Alpine !== 'undefined') {
+            Alpine.store('app').currentView = view;
         }
     }
     setFullScreenMode(fullScreen) {
@@ -214,7 +218,7 @@ window.photoApp = function () {
         // UI state (reactive)
         searchQuery: "",
         selectedPhotoId: null,
-        currentView: "photos",
+        // currentView moved to Alpine.store('app')
         thumbnailSize: 200,
         // Fullscreen state (reactive - synced with viewer)
         fullScreenMode: false,
@@ -388,7 +392,8 @@ window.photoApp = function () {
         },
         // View management
         setCurrentView(view) {
-            this.currentView = view;
+            // Update global Alpine store
+            Alpine.store('app').currentView = view;
             // Update URL when view changes
             appInstance
                 .getRouter()

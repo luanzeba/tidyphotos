@@ -48,8 +48,7 @@ func main() {
 	// Setup routes
 	mux := http.NewServeMux()
 
-	// Static files
-	mux.Handle("/", http.FileServer(http.Dir("public")))
+	// Static asset routes (specific paths only)
 	mux.Handle("/js/", http.FileServer(http.Dir("public")))
 	mux.Handle("/styles/", http.FileServer(http.Dir("public")))
 
@@ -69,6 +68,20 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, "OK")
+	})
+
+	// Catch-all route: Serve index.html for SPA routing
+	// This allows client-side routing to work when reloading pages
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// If it's a file request (has extension), try to serve it from public/
+		if filepath.Ext(r.URL.Path) != "" {
+			http.ServeFile(w, r, filepath.Join("public", r.URL.Path))
+			return
+		}
+
+		// Otherwise, serve index.html for SPA routing
+		// Routes like /people, /gallery/123 will be handled by the client-side router
+		http.ServeFile(w, r, "public/index.html")
 	})
 
 	addr := fmt.Sprintf(":%s", port)

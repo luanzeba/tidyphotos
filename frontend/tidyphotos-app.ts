@@ -3,6 +3,9 @@ import { Router } from "./router.js";
 import { FullscreenViewer } from "./fullscreen-viewer.js";
 import { KeyboardHandler } from "./keyboard-handler.js";
 
+// Alpine.js global type declaration
+declare const Alpine: any;
+
 // Helper functions for timeline filtering (extracted from TimelineManager)
 function getYears(photos: Photo[]): number[] {
   const yearSet = new Set<number>();
@@ -168,7 +171,10 @@ export class TidyPhotosApp {
   }
 
   getCurrentView(): string {
-    return this.alpineData?.currentView ?? "photos";
+    if (typeof Alpine !== 'undefined') {
+      return Alpine.store('app').currentView;
+    }
+    return "photos";
   }
 
   getSelectedPhotoId(): number | null {
@@ -203,8 +209,9 @@ export class TidyPhotosApp {
   }
 
   setCurrentView(view: "photos" | "people"): void {
-    if (this.alpineData) {
-      this.alpineData.currentView = view;
+    // Use Alpine.store for global state management
+    if (typeof Alpine !== 'undefined') {
+      Alpine.store('app').currentView = view;
     }
   }
 
@@ -283,7 +290,7 @@ window.photoApp = function(): any {
     // UI state (reactive)
     searchQuery: "",
     selectedPhotoId: null as number | null,
-    currentView: "photos" as "photos" | "people",
+    // currentView moved to Alpine.store('app')
     thumbnailSize: 200,
 
     // Fullscreen state (reactive - synced with viewer)
@@ -520,7 +527,8 @@ window.photoApp = function(): any {
 
     // View management
     setCurrentView(view: "photos" | "people") {
-      this.currentView = view;
+      // Update global Alpine store
+      Alpine.store('app').currentView = view;
       // Update URL when view changes
       appInstance!
         .getRouter()
