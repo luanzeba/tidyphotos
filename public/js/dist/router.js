@@ -17,29 +17,39 @@ export class Router {
         // Parse route patterns
         const galleryPhotoMatch = path.match(/^\/gallery\/([^\/]+)\/photo\/(\d+)$/);
         const galleryMatch = path.match(/^\/gallery\/([^\/]+)$/);
+        // Router only updates state, never triggers URL updates
+        // This prevents circular dependencies between route changes and state updates
         if (galleryPhotoMatch) {
             // Route: /gallery/{gallery}/photo/{photoId}
             const [, gallery, photoIdStr] = galleryPhotoMatch;
             const photoId = parseInt(photoIdStr, 10);
-            this.app.setCurrentView('photos');
+            if (typeof Alpine !== 'undefined') {
+                Alpine.store('app').currentView = 'photos';
+            }
             this.app.setCurrentGallery(gallery);
             this.app.openFullScreenFromRoute(photoId);
         }
         else if (galleryMatch) {
             // Route: /gallery/{gallery}
             const [, gallery] = galleryMatch;
-            this.app.setCurrentView('photos');
+            if (typeof Alpine !== 'undefined') {
+                Alpine.store('app').currentView = 'photos';
+            }
             this.app.setCurrentGallery(gallery);
             this.app.closeFullScreen();
         }
         else if (path === '/people') {
             // Route: /people
-            this.app.setCurrentView('people');
+            if (typeof Alpine !== 'undefined') {
+                Alpine.store('app').currentView = 'people';
+            }
             this.app.closeFullScreen();
         }
         else if (path === '/') {
             // Route: / (default to 'all' gallery)
-            this.app.setCurrentView('photos');
+            if (typeof Alpine !== 'undefined') {
+                Alpine.store('app').currentView = 'photos';
+            }
             this.app.setCurrentGallery('all');
             this.app.closeFullScreen();
         }
