@@ -219,10 +219,9 @@ export class TidyPhotosApp {
   // DEPRECATED: These methods removed - fullscreen handled by Alpine store
   // setFullScreenMode, closeFullScreen, openFullScreenFromRoute
 
+  // DEPRECATED: toggleFavorite moved to Alpine.store('photos').toggleFavorite()
   async toggleFavorite(photoId: number): Promise<void> {
-    if (this.alpineData) {
-      await this.alpineData.toggleFavorite(photoId);
-    }
+    console.warn('TidyPhotosApp.toggleFavorite is deprecated - use Alpine.store("photos").toggleFavorite() instead');
   }
 
   scrollSelectedIntoView(): void {
@@ -469,73 +468,14 @@ window.photoApp = function(): any {
     },
 
     // Photo operations
-    async toggleFavorite(photoId: number) {
-      const photo = this.photos.find((p: Photo) => p.id === photoId);
-      console.log(
-        "⭐ TidyPhotos: Toggling favorite for photo ID",
-        photoId,
-        "favorite:",
-        photo?.favorite,
-      );
-
-      if (photo) {
-        const originalState = photo.favorite;
-        const newFavoriteState = !originalState;
-
-        // Optimistic update: Update UI immediately
-        photo.favorite = newFavoriteState;
-        console.log(
-          `🚀 Optimistic update: ${newFavoriteState ? "adding" : "removing"} favorite for ${photo.name}`,
-        );
-
-        try {
-          // Call API to persist the change
-          const method = newFavoriteState ? "PUT" : "DELETE";
-          const response = await fetch(
-            `/api/photos/${encodeURIComponent(photo.name)}/favorite`,
-            {
-              method: method,
-            },
-          );
-
-          if (response.ok) {
-            // API call succeeded - optimistic update was correct
-            console.log(
-              `✅ Successfully ${newFavoriteState ? "added" : "removed"} favorite for ${photo.name}`,
-            );
-          } else {
-            // API call failed - revert the optimistic update
-            photo.favorite = originalState;
-            console.error(
-              `❌ Failed to ${newFavoriteState ? "add" : "remove"} favorite, reverting UI:`,
-              response.status,
-              response.statusText,
-            );
-          }
-        } catch (error) {
-          // Network error - revert the optimistic update
-          photo.favorite = originalState;
-          console.error(
-            "❌ Network error while updating favorite, reverting UI:",
-            error,
-          );
-        }
-      }
-    },
+    // DEPRECATED: toggleFavorite moved to Alpine.store('photos').toggleFavorite()
 
     formatDate(dateString: string): string {
       return formatDate(dateString);
     },
 
     // Fullscreen methods DEPRECATED - now handled by Alpine.store('viewer') in index.html
-
-    // TODO: Migrate to Alpine store
-    async toggleFullScreenFavorite() {
-      await appInstance!.viewer.toggleFavorite();
-      // this.syncViewerState();
-      // Also update the photo in the main photos array
-      await this.loadPhotos();
-    },
+    // toggleFullScreenFavorite REMOVED - use Alpine.store('photos').toggleFavorite() instead
 
     // Sync viewer state to Alpine reactive properties
     // NOTE: Photo selection state (currentPhoto, currentPhotoIndex) NOT synced - now in app store

@@ -295,3 +295,23 @@ func (db *DB) DeleteFaceTag(id int64) error {
 	_, err := db.Exec("DELETE FROM face_tags WHERE id = ?", id)
 	return err
 }
+
+// GetPhotoByFilename retrieves a photo by its filename
+func (db *DB) GetPhotoByFilename(filename string) (*Photo, error) {
+	var p Photo
+	err := db.QueryRow(`
+		SELECT id, path, filename, imported_at, favorite, metadata_json, thumbnail_path
+		FROM photos
+		WHERE filename = ?
+	`, filename).Scan(&p.ID, &p.Path, &p.Filename, &p.ImportedAt, &p.Favorite, &p.MetadataJSON, &p.ThumbnailPath)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// SetPhotoFavorite updates the favorite status of a photo
+func (db *DB) SetPhotoFavorite(filename string, favorite bool) error {
+	_, err := db.Exec("UPDATE photos SET favorite = ? WHERE filename = ?", favorite, filename)
+	return err
+}

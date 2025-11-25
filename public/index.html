@@ -162,6 +162,43 @@
                 selectedMonth: null,
                 searchQuery: '',
 
+                // Toggle favorite status with optimistic updates
+                async toggleFavorite(photoId) {
+                    const photo = this.all.find(p => p.id === photoId);
+                    if (!photo) {
+                        console.error('toggleFavorite: Photo not found', photoId);
+                        return;
+                    }
+
+                    const originalState = photo.favorite;
+                    const newFavoriteState = !originalState;
+
+                    // Optimistic update: Update UI immediately
+                    photo.favorite = newFavoriteState;
+                    console.log(`🚀 Optimistic update: ${newFavoriteState ? 'adding' : 'removing'} favorite for ${photo.name}`);
+
+                    try {
+                        // Call API to persist the change
+                        const method = newFavoriteState ? 'PUT' : 'DELETE';
+                        const response = await fetch(`/api/photos/${encodeURIComponent(photo.name)}/favorite`, {
+                            method: method
+                        });
+
+                        if (response.ok) {
+                            // API call succeeded - optimistic update was correct
+                            console.log(`✅ Successfully ${newFavoriteState ? 'added' : 'removed'} favorite for ${photo.name}`);
+                        } else {
+                            // API call failed - revert the optimistic update
+                            photo.favorite = originalState;
+                            console.error(`❌ Failed to ${newFavoriteState ? 'add' : 'remove'} favorite, reverting UI:`, response.status, response.statusText);
+                        }
+                    } catch (error) {
+                        // Network error - revert the optimistic update
+                        photo.favorite = originalState;
+                        console.error('❌ Network error while updating favorite, reverting UI:', error);
+                    }
+                },
+
                 // Computed getter for filtered photos
                 get filteredPhotos() {
                     let filtered = this.all;
@@ -830,7 +867,7 @@
                   @keydown.arrow-right.window.prevent="!$store.viewer.isOpen && gallerySelectNext()"
                   @keydown.arrow-left.window.prevent="!$store.viewer.isOpen && gallerySelectPrevious()"
                   @keydown.escape.window="!$store.viewer.isOpen && ($store.app.selectedPhotoIndex = null)"
-                  @keydown.f.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && toggleFavorite($store.app.selectedPhoto.id)">
+                  @keydown.f.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.photos.toggleFavorite($store.app.selectedPhoto.id)">
             <template x-for="photo in $store.photos.filteredPhotos" :key="photo.id">
                 <div
                     class="photo-item"
@@ -840,7 +877,7 @@
                     @focus="selectPhoto(photo.id)"
                     tabindex="0">
                     <img :src="photo.thumbnail" :alt="photo.name" loading="lazy">
-                    <button class="favorite-heart" :class="{ active: photo.favorite }" @click.stop="toggleFavorite(photo.id)" tabindex="-1">
+                    <button class="favorite-heart" :class="{ active: photo.favorite }" @click.stop="$store.photos.toggleFavorite(photo.id)" tabindex="-1">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                         </svg>
@@ -973,7 +1010,7 @@
              @keydown.arrow-left.window="$store.viewer.isOpen && $store.viewer.previous()"
              @keydown.arrow-right.window="$store.viewer.isOpen && $store.viewer.next()"
              @keydown.q.window="$store.viewer.isOpen && $store.viewer.close()"
-             @keydown.f.window.prevent="$store.viewer.isOpen && toggleFullScreenFavorite()"
+             @keydown.f.window.prevent="$store.viewer.isOpen && $store.viewer.currentPhoto && $store.photos.toggleFavorite($store.viewer.currentPhoto.id)"
              @keydown.t.window.prevent="$store.viewer.isOpen && $store.viewer.toggleTaggingMode()"
              @click.self="$store.viewer.close()">
             <div class="photo-viewer-header">
@@ -992,7 +1029,7 @@
                         </svg>
                     </button>
                     <button
-                        @click="toggleFullScreenFavorite"
+                        @click="$store.viewer.currentPhoto && $store.photos.toggleFavorite($store.viewer.currentPhoto.id)"
                         class="favorite-heart-fullscreen"
                         :class="{ active: $store.viewer.currentPhoto?.favorite }"
                         title="Favorite (F)">

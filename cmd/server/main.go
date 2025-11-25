@@ -18,14 +18,21 @@ func main() {
 	port := getEnv("PORT", "8080")
 	photosDir := getEnv("PHOTOS_DIR", "test_photos")
 	cacheDir := getEnv("CACHE_DIR", "cache")
+	favoritesDir := getEnv("FAVORITES_DIR", filepath.Join(photosDir, "favorites"))
 
 	log.Printf("🚀 TidyPhotos Server Starting...")
 	log.Printf("   Photos: %s", photosDir)
 	log.Printf("   Cache: %s", cacheDir)
+	log.Printf("   Favorites: %s", favoritesDir)
 
 	// Ensure cache directory exists
 	thumbDir := filepath.Join(cacheDir, "thumbnails")
 	if err := os.MkdirAll(thumbDir, 0755); err != nil {
+		log.Fatal(err)
+	}
+
+	// Ensure favorites directory exists
+	if err := os.MkdirAll(favoritesDir, 0755); err != nil {
 		log.Fatal(err)
 	}
 
@@ -45,6 +52,11 @@ func main() {
 		log.Printf("⚠️  Import warning: %v", err)
 	}
 
+	// Sync favorites from filesystem
+	if err := imp.SyncFavorites(favoritesDir); err != nil {
+		log.Printf("⚠️  Favorites sync warning: %v", err)
+	}
+
 	// Setup routes
 	mux := http.NewServeMux()
 
@@ -54,7 +66,7 @@ func main() {
 
 	// API routes
 	mux.HandleFunc("/api/photos", listPhotos(database))
-	mux.HandleFunc("/api/photos/", servePhoto(photosDir))
+	mux.HandleFunc("/api/photos/", handlePhotoActions(database, photosDir, favoritesDir))
 
 	mux.HandleFunc("/api/people", handlePeople(database))
 	mux.HandleFunc("/api/people/", handlePersonActions(database))
@@ -91,6 +103,100 @@ func main() {
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// handlePhotoActions routes photo-related requests to appropriate handlers
+func handlePhotoActions(database *db.DB, photosDir, favoritesDir string) http.HandlerFunc {
+	photoServer := servePhoto(photosDir)
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract path after /api/photos/
+		path := r.URL.Path[len("/api/photos/"):]
+
+		// Check if this is a favorite action (ends with /favorite)
+		if len(path) > 9 && path[len(path)-9:] == "/favorite" {
+			// Extract filename (everything before /favorite)
+			filename := path[:len(path)-9]
+			handlePhotoFavorite(database, photosDir, favoritesDir, filename)(w, r)
+			return
+		}
+
+		// Otherwise, serve the photo
+		photoServer(w, r)
+	}
+}
+
+// handlePhotoFavorite handles PUT (add favorite) and DELETE (remove favorite)
+func handlePhotoFavorite(database *db.DB, photosDir, favoritesDir, filename string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PUT":
+			// Add to favorites
+			photo, err := database.GetPhotoByFilename(filename)
+			if err != nil {
+				log.Printf("Error getting photo %s: %v", filename, err)
+				http.Error(w, "Photo not found", http.StatusNotFound)
+				return
+			}
+
+			// Create symlink in favorites directory
+			sourcePath := filepath.Join(photosDir, photo.Path)
+			symlinkPath := filepath.Join(favoritesDir, filename)
+
+			// Remove existing symlink if it exists (idempotent)
+			os.Remove(symlinkPath)
+
+			// Create relative symlink
+			relPath, err := filepath.Rel(favoritesDir, sourcePath)
+			if err != nil {
+				log.Printf("Error creating relative path for %s: %v", filename, err)
+				http.Error(w, "Failed to create favorite", http.StatusInternalServerError)
+				return
+			}
+
+			if err := os.Symlink(relPath, symlinkPath); err != nil {
+				log.Printf("Error creating symlink for %s: %v", filename, err)
+				http.Error(w, "Failed to create favorite", http.StatusInternalServerError)
+				return
+			}
+
+			// Update database
+			if err := database.SetPhotoFavorite(filename, true); err != nil {
+				log.Printf("Error updating favorite status for %s: %v", filename, err)
+				// Attempt to clean up symlink
+				os.Remove(symlinkPath)
+				http.Error(w, "Failed to update favorite status", http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("✅ Added favorite: %s", filename)
+			w.WriteHeader(http.StatusOK)
+
+		case "DELETE":
+			// Remove from favorites
+			symlinkPath := filepath.Join(favoritesDir, filename)
+
+			// Remove symlink (idempotent - no error if doesn't exist)
+			if err := os.Remove(symlinkPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("Error removing symlink for %s: %v", filename, err)
+				http.Error(w, "Failed to remove favorite", http.StatusInternalServerError)
+				return
+			}
+
+			// Update database
+			if err := database.SetPhotoFavorite(filename, false); err != nil {
+				log.Printf("Error updating favorite status for %s: %v", filename, err)
+				http.Error(w, "Failed to update favorite status", http.StatusInternalServerError)
+				return
+			}
+
+			log.Printf("✅ Removed favorite: %s", filename)
+			w.WriteHeader(http.StatusNoContent)
+
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
 	}
 }
 

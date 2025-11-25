@@ -24,10 +24,9 @@ export class FullscreenViewer {
         return null;
     }
     // Navigation methods REMOVED - now handled by Alpine.store('app') and Alpine.store('viewer')
+    // DEPRECATED: toggleFavorite moved to Alpine.store('photos').toggleFavorite()
     async toggleFavorite() {
-        if (this.currentPhoto) {
-            await this.app.getPhotoManager().toggleFavorite(this.currentPhoto.id);
-        }
+        console.warn('FullscreenViewer.toggleFavorite is deprecated - use Alpine.store("photos").toggleFavorite() instead');
     }
 }
 //# sourceMappingURL=fullscreen-viewer.js.map

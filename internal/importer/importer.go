@@ -236,6 +236,64 @@ func isImageFile(path string) bool {
 	return false
 }
 
+// SyncFavorites synchronizes favorite status from filesystem to database
+// This ensures the favorites directory is the source of truth
+func (imp *Importer) SyncFavorites(favoritesDir string) error {
+	log.Printf("⭐ Syncing favorites from filesystem...")
+
+	// Get all photos from database
+	photos, err := imp.db.GetPhotos()
+	if err != nil {
+		return fmt.Errorf("failed to get photos: %w", err)
+	}
+
+	// Create a map of all photo filenames
+	photoMap := make(map[string]bool)
+	for _, photo := range photos {
+		photoMap[photo.Filename] = false // Start with all non-favorite
+	}
+
+	// Scan favorites directory for symlinks
+	entries, err := os.ReadDir(favoritesDir)
+	if err != nil {
+		// If favorites directory doesn't exist, just skip
+		if os.IsNotExist(err) {
+			log.Printf("   Favorites directory does not exist, skipping sync")
+			return nil
+		}
+		return fmt.Errorf("failed to read favorites directory: %w", err)
+	}
+
+	favoritesCount := 0
+	for _, entry := range entries {
+		// Only process symlinks (not regular files or directories)
+		if entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+
+		filename := entry.Name()
+
+		// Mark this photo as favorite if it exists in database
+		if _, exists := photoMap[filename]; exists {
+			photoMap[filename] = true
+			favoritesCount++
+		}
+	}
+
+	// Update database for all photos
+	updatedCount := 0
+	for filename, shouldBeFavorite := range photoMap {
+		if err := imp.db.SetPhotoFavorite(filename, shouldBeFavorite); err != nil {
+			log.Printf("⚠️  Failed to update favorite status for %s: %v", filename, err)
+		} else {
+			updatedCount++
+		}
+	}
+
+	log.Printf("   Synced %d favorites from filesystem", favoritesCount)
+	return nil
+}
+
 // ImportStats returns import statistics
 func (imp *Importer) ImportStats() (map[string]interface{}, error) {
 	photos, err := imp.db.GetPhotos()
