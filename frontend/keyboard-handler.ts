@@ -1,3 +1,21 @@
+// ⚠️ DEPRECATED: This KeyboardHandler class is largely unused.
+// Keyboard handling has been moved to Alpine.js directives in public/index.html
+//
+// Gallery keyboard shortcuts now handled by:
+// - @keydown.arrow-right.window.prevent in gallery element
+// - @keydown.arrow-left.window.prevent in gallery element
+// - @keydown.enter.window.prevent for opening fullscreen
+// - @keydown.f.window.prevent for toggling favorites
+//
+// Fullscreen viewer keyboard shortcuts handled by:
+// - @keydown.arrow-right.window in viewer overlay
+// - @keydown.arrow-left.window in viewer overlay
+// - @keydown.escape.window for closing viewer
+// - @keydown.q.window for closing viewer
+// - @keydown.t.window.prevent for toggling tagging mode
+//
+// This file is kept for reference but may be deleted in the future.
+
 import { Photo } from "./types.js";
 import type { TidyPhotosApp } from "./tidyphotos-app.js";
 
@@ -43,13 +61,14 @@ export class KeyboardHandler {
     if (photos.length === 0) return;
 
     // Handle space bar to open full screen
+    // DEPRECATED: This is now handled by Alpine store in index.html
     if (event.key === " " || event.key === "Spacebar") {
-      const selectedPhotoId = this.app.getSelectedPhotoId();
-      if (selectedPhotoId !== null && !this.app.getViewer().isFullScreen) {
-        event.preventDefault();
-        this.app.getViewer().openFullScreen(selectedPhotoId);
-        return;
-      }
+      // const selectedPhotoId = this.app.getSelectedPhotoId();
+      // if (selectedPhotoId !== null && !this.app.getViewer().isFullScreen) {
+      //   event.preventDefault();
+      //   this.app.getViewer().openFullScreen(selectedPhotoId);
+      //   return;
+      // }
     }
 
     const selectedPhotoId = this.app.getSelectedPhotoId();
@@ -109,12 +128,13 @@ export class KeyboardHandler {
         break;
 
       case "Escape":
-        if (this.app.getViewer().isFullScreen) {
-          event.preventDefault();
-          this.app.getViewer().closeFullScreen();
-        } else {
+        // DEPRECATED: Fullscreen close now handled by Alpine store in index.html
+        // if (this.app.getViewer().isFullScreen) {
+        //   event.preventDefault();
+        //   this.app.getViewer().closeFullScreen();
+        // } else {
           this.app.setSelectedPhotoId(null);
-        }
+        // }
         break;
     }
 

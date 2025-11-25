@@ -11,11 +11,725 @@
         document.addEventListener('alpine:init', () => {
             console.log('🏔️ Alpine.js: Initialized');
 
-            // Set up Alpine global store for app state
+            // Set up Alpine global stores
+
+            // App-level state (view routing and photo selection - SINGLE SOURCE OF TRUTH)
             Alpine.store('app', {
-                currentView: 'photos'
+                currentView: 'photos',
+                selectedPhotoIndex: null,
+
+                // Computed getter for selected photo (works for both gallery and fullscreen)
+                get selectedPhoto() {
+                    if (this.selectedPhotoIndex === null || this.selectedPhotoIndex < 0) {
+                        return null;
+                    }
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    return photos[this.selectedPhotoIndex] || null;
+                },
+
+                // Select photo by index in filtered photos array
+                selectPhotoByIndex(index) {
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    if (index < 0 || index >= photos.length) {
+                        console.warn('selectPhotoByIndex: index out of bounds', index);
+                        this.selectedPhotoIndex = null;
+                        return;
+                    }
+                    this.selectedPhotoIndex = index;
+                    console.log('📍 App: Selected photo at index', index, '- ID:', this.selectedPhoto?.id);
+                },
+
+                // Select photo by photo ID
+                selectPhotoById(photoId) {
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    const index = photos.findIndex(p => p.id === photoId);
+                    if (index === -1) {
+                        console.warn('selectPhotoById: photo not found', photoId);
+                        this.selectedPhotoIndex = null;
+                        return;
+                    }
+                    this.selectPhotoByIndex(index);
+                },
+
+                // Ensure a photo is selected (select first if none selected)
+                ensurePhotoSelected() {
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    if (this.selectedPhotoIndex === null && photos.length > 0) {
+                        this.selectPhotoByIndex(0);
+                    }
+                },
+
+                // Navigate to next photo (wraps around to start)
+                selectNext() {
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    if (photos.length === 0) return;
+
+                    if (this.selectedPhotoIndex === null) {
+                        this.selectPhotoByIndex(0);
+                    } else if (this.selectedPhotoIndex >= photos.length - 1) {
+                        this.selectPhotoByIndex(0); // Wrap to start
+                    } else {
+                        this.selectPhotoByIndex(this.selectedPhotoIndex + 1);
+                    }
+                },
+
+                // Navigate to previous photo (wraps around to end)
+                selectPrevious() {
+                    const photos = Alpine.store('photos').filteredPhotos;
+                    if (photos.length === 0) return;
+
+                    if (this.selectedPhotoIndex === null) {
+                        this.selectPhotoByIndex(photos.length - 1);
+                    } else if (this.selectedPhotoIndex <= 0) {
+                        this.selectPhotoByIndex(photos.length - 1); // Wrap to end
+                    } else {
+                        this.selectPhotoByIndex(this.selectedPhotoIndex - 1);
+                    }
+                },
+
+                // Routing: Handle URL changes
+                handleRoute() {
+                    const path = window.location.pathname;
+                    console.log('🔀 Handling route:', path);
+
+                    const photoMatch = path.match(/^\/gallery\/\w+\/photo\/(\d+)$/);
+
+                    if (photoMatch) {
+                        // Photo route - open fullscreen when photos are ready
+                        const photoId = parseInt(photoMatch[1], 10);
+                        console.log('📷 Opening photo from URL:', photoId);
+                        this.currentView = 'photos';
+                        this.openPhotoWhenReady(photoId);
+                    } else if (path === '/people') {
+                        // People route
+                        console.log('👥 Navigating to People view');
+                        this.currentView = 'people';
+                        Alpine.store('viewer').close();
+                    } else {
+                        // Gallery route (default)
+                        console.log('🖼️ Navigating to Gallery view');
+                        this.currentView = 'photos';
+                        Alpine.store('viewer').close();
+                    }
+                },
+
+                // Helper: Open photo when data is ready
+                openPhotoWhenReady(photoId) {
+                    if (!Alpine.store('photos').loading) {
+                        Alpine.store('viewer').open(photoId);
+                    } else {
+                        // Poll until photos are loaded
+                        const checkLoaded = () => {
+                            if (!Alpine.store('photos').loading) {
+                                Alpine.store('viewer').open(photoId);
+                            } else {
+                                setTimeout(checkLoaded, 100);
+                            }
+                        };
+                        checkLoaded();
+                    }
+                },
+
+                // Update browser URL based on current state
+                updateUrl() {
+                    let newPath;
+
+                    if (this.currentView === 'people') {
+                        newPath = '/people';
+                    } else if (Alpine.store('viewer').isOpen && this.selectedPhoto) {
+                        newPath = `/gallery/all/photo/${this.selectedPhoto.id}`;
+                    } else {
+                        newPath = '/';
+                    }
+
+                    if (window.location.pathname !== newPath) {
+                        const state = {
+                            gallery: 'all',
+                            photoId: this.selectedPhoto?.id,
+                            view: this.currentView
+                        };
+                        window.history.pushState(state, '', newPath);
+                        console.log('🔗 App: Updated URL:', newPath);
+                    }
+                }
+            });
+
+            // Photo data and filtering (delegates selection to app store)
+            Alpine.store('photos', {
+                all: [],
+                loading: true,
+                selectedYear: null,
+                selectedMonth: null,
+                searchQuery: '',
+
+                // Computed getter for filtered photos
+                get filteredPhotos() {
+                    let filtered = this.all;
+
+                    // Filter by search query
+                    if (this.searchQuery) {
+                        const query = this.searchQuery.toLowerCase();
+                        filtered = filtered.filter(photo =>
+                            photo.name.toLowerCase().includes(query) ||
+                            photo.tags?.some(tag => tag.toLowerCase().includes(query))
+                        );
+                    }
+
+                    // Filter by year/month
+                    if (this.selectedYear) {
+                        filtered = filtered.filter(photo => {
+                            const date = new Date(photo.date);
+                            const yearMatch = date.getFullYear() === this.selectedYear;
+                            if (this.selectedMonth !== null) {
+                                return yearMatch && date.getMonth() === this.selectedMonth;
+                            }
+                            return yearMatch;
+                        });
+                    }
+
+                    // Sort by date descending
+                    return filtered.sort((a, b) =>
+                        new Date(b.date).getTime() - new Date(a.date).getTime()
+                    );
+                },
+
+                // Delegate to app store - these are convenience aliases
+                get selectedPhoto() {
+                    return Alpine.store('app').selectedPhoto;
+                },
+
+                get selectedPhotoIndex() {
+                    return Alpine.store('app').selectedPhotoIndex;
+                },
+
+                selectPhotoByIndex(index) {
+                    Alpine.store('app').selectPhotoByIndex(index);
+                },
+
+                selectPhotoById(photoId) {
+                    Alpine.store('app').selectPhotoById(photoId);
+                },
+
+                selectNext() {
+                    Alpine.store('app').selectNext();
+                },
+
+                selectPrevious() {
+                    Alpine.store('app').selectPrevious();
+                },
+
+                ensurePhotoSelected() {
+                    Alpine.store('app').ensurePhotoSelected();
+                }
+            });
+
+            // Fullscreen viewer state (delegates navigation to app store)
+            Alpine.store('viewer', {
+                isOpen: false,
+
+                // Face tagging state
+                taggingMode: false,
+                faceTags: [],
+
+                // Drawing state
+                isDrawing: false,
+                drawingPreview: null,
+                drawStartPos: null,
+                originalStartPos: null,
+                isDragging: false,
+                clickStartTime: 0,
+
+                // Computed getter for current photo (reads from app store)
+                get currentPhoto() {
+                    return Alpine.store('app').selectedPhoto;
+                },
+
+                // Computed getter for current photo index (reads from app store)
+                get currentPhotoIndex() {
+                    return Alpine.store('app').selectedPhotoIndex ?? 0;
+                },
+
+                // Helper: Load face tags for current photo
+                async loadFaceTags() {
+                    const photo = this.currentPhoto;
+                    console.log('🏷️ loadFaceTags() - photo:', photo?.id, photo?.name);
+                    if (!photo?.name) {
+                        console.log('⛔ loadFaceTags() - no photo name');
+                        this.faceTags = [];
+                        return;
+                    }
+
+                    try {
+                        console.log('📡 loadFaceTags() - fetching tags for:', photo.name);
+                        const response = await fetch(`/api/face-tags?photo=${encodeURIComponent(photo.name)}`);
+                        if (response.ok) {
+                            const tags = await response.json();
+                            this.faceTags = tags || [];
+                            console.log(`✅ loadFaceTags() - loaded ${this.faceTags.length} face tags for ${photo.name}`);
+                        } else {
+                            console.error('❌ loadFaceTags() - failed:', response.statusText);
+                            this.faceTags = [];
+                        }
+                    } catch (error) {
+                        console.error('❌ loadFaceTags() - error:', error);
+                        this.faceTags = [];
+                    }
+                },
+
+                // Action methods
+                async open(photoId) {
+                    console.log('🔵 Viewer: Opening photo ID:', photoId);
+
+                    // Use app store to select the photo
+                    Alpine.store('app').selectPhotoById(photoId);
+
+                    // Open viewer and load face tags
+                    this.isOpen = true;
+                    await this.loadFaceTags();
+                    Alpine.store('app').updateUrl();
+
+                    console.log('✅ Viewer: Opened at photo', this.currentPhoto?.id);
+                },
+
+                close() {
+                    this.isOpen = false;
+                    this.taggingMode = false;
+                    this.faceTags = [];
+                    this.isDrawing = false;
+                    this.drawingPreview = null;
+                    this.drawStartPos = null;
+                    this.originalStartPos = null;
+                    this.isDragging = false;
+                    this.clickStartTime = 0;
+                    Alpine.store('app').updateUrl();
+
+                    // Sync browser focus to selected photo when returning to gallery
+                    setTimeout(() => {
+                        const selectedElement = document.querySelector('.photo-item.selected');
+                        if (selectedElement) {
+                            selectedElement.focus();
+                            console.log('🎯 Viewer closed: Focused on selected photo');
+                        }
+                    }, 0);
+                },
+
+                async next() {
+                    if (!this.isOpen) return;
+
+                    // Reset drawing state when navigating
+                    this.isDrawing = false;
+                    this.drawStartPos = null;
+                    this.drawingPreview = null;
+                    this.originalStartPos = null;
+                    this.isDragging = false;
+
+                    // Use app store for navigation
+                    Alpine.store('app').selectNext();
+
+                    // Update viewer-specific state
+                    await this.loadFaceTags();
+                    Alpine.store('app').updateUrl();
+                },
+
+                async previous() {
+                    if (!this.isOpen) return;
+
+                    // Reset drawing state when navigating
+                    this.isDrawing = false;
+                    this.drawStartPos = null;
+                    this.drawingPreview = null;
+                    this.originalStartPos = null;
+                    this.isDragging = false;
+
+                    // Use app store for navigation
+                    Alpine.store('app').selectPrevious();
+
+                    // Update viewer-specific state
+                    await this.loadFaceTags();
+                    Alpine.store('app').updateUrl();
+                },
+
+                // === Face Tagging Drawing Methods ===
+
+                // Convert mouse event to image-relative percentage coordinates
+                convertEventToCoordinates(event) {
+                    const container = event.currentTarget;
+                    const img = container.querySelector('img');
+                    if (!img) return null;
+
+                    const rect = img.getBoundingClientRect();
+                    const x = ((event.clientX - rect.left) / rect.width) * 100;
+                    const y = ((event.clientY - rect.top) / rect.height) * 100;
+                    return { x, y };
+                },
+
+                // Start drawing a face tag
+                startDrawingTag(event) {
+                    if (!this.taggingMode) return;
+
+                    // Check if click target is a button or UI element
+                    const target = event.target;
+                    if (target.tagName === 'BUTTON' ||
+                        target.closest('button') ||
+                        target.closest('.face-tag-controls')) {
+                        return; // Don't start drawing on UI elements
+                    }
+
+                    const coordinates = this.convertEventToCoordinates(event);
+                    if (!coordinates) return;
+
+                    const { x, y } = coordinates;
+                    this.clickStartTime = Date.now();
+                    this.isDragging = false;
+
+                    if (!this.isDrawing) {
+                        // First click - start a new tag
+                        this.isDrawing = true;
+                        this.originalStartPos = { x, y };
+                        this.drawStartPos = { x, y, width: 0, height: 0 };
+                        console.log('🎯 Started tag at:', x, y);
+                    } else {
+                        // Second click - complete the tag (click-click mode)
+                        this.finishDrawingTag(event);
+                    }
+                },
+
+                // Update tag preview during drag
+                updateDrawingTag(event) {
+                    if (!this.isDrawing || !this.drawStartPos || !this.originalStartPos) return;
+
+                    const coordinates = this.convertEventToCoordinates(event);
+                    if (!coordinates) return;
+
+                    const { x, y } = coordinates;
+
+                    // Detect if we're dragging (moved more than 2 pixels from start)
+                    const deltaX = Math.abs(x - this.originalStartPos.x);
+                    const deltaY = Math.abs(y - this.originalStartPos.y);
+                    if ((deltaX > 2 || deltaY > 2) && !this.isDragging) {
+                        this.isDragging = true;
+                        console.log('🖱️ Started dragging');
+                    }
+
+                    if (this.isDragging) {
+                        // Calculate rectangle bounds for bi-directional dragging
+                        const minX = Math.min(this.originalStartPos.x, x);
+                        const minY = Math.min(this.originalStartPos.y, y);
+                        const maxX = Math.max(this.originalStartPos.x, x);
+                        const maxY = Math.max(this.originalStartPos.y, y);
+
+                        // Update preview rectangle to show current drag state
+                        this.drawStartPos.x = minX;
+                        this.drawStartPos.y = minY;
+                        this.drawStartPos.width = maxX - minX;
+                        this.drawStartPos.height = maxY - minY;
+
+                        // Update drawing preview for Alpine binding
+                        this.drawingPreview = {
+                            x: this.drawStartPos.x,
+                            y: this.drawStartPos.y,
+                            width: this.drawStartPos.width,
+                            height: this.drawStartPos.height
+                        };
+                    }
+                },
+
+                // Complete tag creation
+                async finishDrawingTag(event) {
+                    if (!this.isDrawing || !this.drawStartPos || !this.originalStartPos) return;
+
+                    const coordinates = this.convertEventToCoordinates(event);
+                    if (!coordinates) return;
+
+                    const { x, y } = coordinates;
+
+                    // Determine if this is from click-click mode or drag mode
+                    const isFromClickClick = !this.isDragging && event.type === 'mousedown';
+
+                    // For click-click mode, always create the tag when called from second click
+                    // For drag mode, only create if we were actually dragging
+                    const shouldCreateTag = isFromClickClick || this.isDragging;
+
+                    if (shouldCreateTag) {
+                        const tag = {
+                            id: Date.now(),
+                            x: Math.min(this.originalStartPos.x, x),
+                            y: Math.min(this.originalStartPos.y, y),
+                            width: Math.abs(x - this.originalStartPos.x),
+                            height: Math.abs(y - this.originalStartPos.y),
+                            personId: null,
+                            personName: ''
+                        };
+
+                        // Only add if tag has reasonable size (allow smaller tags for click-click mode)
+                        const minSize = isFromClickClick ? 1 : 2;
+                        if (tag.width > minSize && tag.height > minSize) {
+                            // Save to database immediately
+                            try {
+                                const savedTag = await this.saveFaceTagToDatabase(tag);
+                                if (savedTag) {
+                                    this.faceTags.push(savedTag);
+                                    console.log('✅ Added face tag:', savedTag, 'Total tags:', this.faceTags.length);
+                                }
+                            } catch (error) {
+                                console.error('Failed to save face tag:', error);
+                            }
+
+                            // Reset drawing state after successful tag creation
+                            this.isDrawing = false;
+                            this.drawStartPos = null;
+                            this.drawingPreview = null;
+                            this.originalStartPos = null;
+                            this.isDragging = false;
+                        } else {
+                            console.log('❌ Tag too small, not added. Size:', tag.width, 'x', tag.height);
+
+                            // For drag mode, reset state if tag is too small
+                            // For click-click mode, always reset since user completed the action
+                            if (this.isDragging || isFromClickClick) {
+                                this.isDrawing = false;
+                                this.drawStartPos = null;
+                                this.drawingPreview = null;
+                                this.originalStartPos = null;
+                                this.isDragging = false;
+                            }
+                        }
+                    } else {
+                        // This is a mouseup without enough drag - don't create tag, wait for second click
+                        console.log('🖱️ Mouseup without drag - waiting for second click');
+                    }
+                },
+
+                // === Face Tagging Management Methods ===
+
+                // Toggle tagging mode on/off
+                toggleTaggingMode() {
+                    this.taggingMode = !this.taggingMode;
+                    if (!this.taggingMode) {
+                        // Reset drawing state when exiting tagging mode
+                        this.isDrawing = false;
+                        this.drawStartPos = null;
+                        this.drawingPreview = null;
+                        this.originalStartPos = null;
+                        this.isDragging = false;
+                        this.clickStartTime = 0;
+                        console.log('🏷️ Tagging mode: OFF');
+                    } else {
+                        console.log('🏷️ Tagging mode: ON');
+                    }
+                },
+
+                // Load face tags for current photo
+                async loadFaceTags() {
+                    const photo = this.currentPhoto;
+                    if (!photo?.name) {
+                        this.faceTags = [];
+                        return;
+                    }
+
+                    try {
+                        console.log('📡 loadFaceTags() - fetching tags for:', photo.name);
+                        const response = await fetch(`/api/face-tags?photo=${encodeURIComponent(photo.name)}`);
+                        if (response.ok) {
+                            const tags = await response.json();
+
+                            // Map snake_case API fields to camelCase and add personName
+                            const people = Alpine.store('people').all;
+                            this.faceTags = (tags || []).map(tag => ({
+                                id: tag.id,
+                                x: tag.x,
+                                y: tag.y,
+                                width: tag.width,
+                                height: tag.height,
+                                personId: tag.person_id,
+                                personName: tag.person_id ? (people.find(p => p.id === tag.person_id)?.name || '') : '',
+                                confidence: tag.confidence
+                            }));
+
+                            console.log('📸 Loaded', this.faceTags.length, 'face tags for photo', photo.name);
+                        } else {
+                            console.warn('Failed to load face tags:', response.statusText);
+                            this.faceTags = [];
+                        }
+                    } catch (error) {
+                        console.error('❌ Error loading face tags:', error);
+                        this.faceTags = [];
+                    }
+                },
+
+                // Save a new face tag to database
+                async saveFaceTagToDatabase(tag) {
+                    const photo = this.currentPhoto;
+                    if (!photo?.name) return null;
+
+                    try {
+                        const response = await fetch('/api/face-tags', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                photo_filename: photo.name,
+                                x: tag.x,
+                                y: tag.y,
+                                width: tag.width,
+                                height: tag.height,
+                                person_id: tag.personId || null,
+                                confidence: 1.0
+                            })
+                        });
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            // Backend returns {id: number}
+                            const savedTag = {
+                                id: data.id,
+                                x: tag.x,
+                                y: tag.y,
+                                width: tag.width,
+                                height: tag.height,
+                                personId: tag.personId,
+                                personName: tag.personName || '',
+                                confidence: 1.0
+                            };
+                            console.log('✅ Saved face tag to database:', savedTag);
+                            return savedTag;
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to save face tag:', response.statusText, errorText);
+                            return null;
+                        }
+                    } catch (error) {
+                        console.error('❌ Error saving face tag:', error);
+                        return null;
+                    }
+                },
+
+                // Remove a face tag
+                async removeTag(tagId) {
+                    const tag = this.faceTags.find(t => t.id === tagId);
+                    if (!tag) return;
+
+                    try {
+                        const response = await fetch(`/api/face-tags/${tagId}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (response.ok) {
+                            this.faceTags = this.faceTags.filter(t => t.id !== tagId);
+                            console.log('✅ Removed face tag:', tagId);
+                        } else {
+                            console.error('Failed to remove face tag:', response.statusText);
+                        }
+                    } catch (error) {
+                        console.error('❌ Error removing face tag:', error);
+                    }
+                }
+            });
+
+            // Face tagging UI state
+            Alpine.store('tagging', {
+                showAssignModal: false,
+                selectedTagId: null,
+
+                // Open person assignment modal for a tag
+                openAssignModal(tagId) {
+                    this.selectedTagId = tagId;
+                    this.showAssignModal = true;
+                    console.log('📋 Opening assignment modal for tag:', tagId);
+                },
+
+                // Close person assignment modal
+                closeAssignModal() {
+                    this.showAssignModal = false;
+                    this.selectedTagId = null;
+                    console.log('📋 Closed assignment modal');
+                },
+
+                // Assign a person to the selected tag
+                async assignPersonToTag(personId, personName) {
+                    if (!this.selectedTagId) {
+                        console.error('No tag selected for assignment');
+                        return;
+                    }
+
+                    const tagId = this.selectedTagId;
+                    const viewer = Alpine.store('viewer');
+                    const tag = viewer.faceTags.find(t => t.id === tagId);
+
+                    if (!tag) {
+                        console.error('Tag not found:', tagId);
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`/api/face-tags/${tagId}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                person_id: personId
+                            })
+                        });
+
+                        if (response.ok) {
+                            // Update tag in viewer store
+                            tag.personId = personId;
+                            tag.personName = personName;
+                            console.log('✅ Updated face tag with person:', personName);
+
+                            // Close modal
+                            this.closeAssignModal();
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to update face tag:', response.statusText, errorText);
+                        }
+                    } catch (error) {
+                        console.error('❌ Error updating face tag:', error);
+                    }
+                }
+            });
+
+            // Global people data (for tag assignment and people management)
+            Alpine.store('people', {
+                all: [],
+                loading: true,
+
+                async loadPeople() {
+                    this.loading = true;
+                    try {
+                        console.log('📡 People: Loading from API...');
+                        const response = await fetch('/api/people');
+                        if (!response.ok) {
+                            throw new Error(`Failed to load people: ${response.statusText}`);
+                        }
+                        this.all = await response.json();
+                        this.loading = false;
+                        console.log('✅ People: Loaded', this.all.length, 'people');
+                    } catch (error) {
+                        console.error('❌ People: Failed to load:', error);
+                        this.all = [];
+                        this.loading = false;
+                    }
+                }
+            });
+
+            console.log('✅ Alpine stores initialized: app, photos, viewer, tagging, people');
+
+            // Handle initial route immediately
+            Alpine.store('app').handleRoute();
+
+            // Load people data globally (needed for tag assignment)
+            Alpine.store('people').loadPeople();
+
+            // Handle browser back/forward navigation
+            window.addEventListener('popstate', () => {
+                console.log('⬅️➡️ Browser navigation detected');
+                Alpine.store('app').handleRoute();
             });
         });
+
         window.addEventListener('load', () => {
             console.log('🌍 TidyPhotos: Page loaded, Alpine available:', !!window.Alpine);
         });
@@ -65,7 +779,7 @@
                         class="thumbnail-size-slider">
                     <span x-text="thumbnailSize + 'px'" class="thumbnail-size-value"></span>
                 </div>
-                <input type="search" x-model="searchQuery" placeholder="Search photos..." class="search">
+                <input type="search" x-model="$store.photos.searchQuery" placeholder="Search photos..." class="search">
             </div>
         </header>
 
@@ -78,23 +792,23 @@
                     <h3>Years</h3>
                     <div class="timeline-buttons">
                         <template x-for="year in years" :key="year">
-                            <button 
-                                @click="selectYear(year)" 
-                                :class="{ active: selectedYear === year }"
+                            <button
+                                @click="$store.photos.selectedYear = year; $store.photos.selectedMonth = null"
+                                :class="{ active: $store.photos.selectedYear === year }"
                                 x-text="year"
                                 class="timeline-btn">
                             </button>
                         </template>
                     </div>
                 </div>
-                
-                <div class="timeline-section" x-show="selectedYear">
+
+                <div class="timeline-section" x-show="$store.photos.selectedYear">
                     <h3>Months</h3>
                     <div class="timeline-buttons">
                         <template x-for="month in months" :key="month.number">
-                            <button 
-                                @click="selectMonth(month.number)" 
-                                :class="{ active: selectedMonth === month.number }"
+                            <button
+                                @click="$store.photos.selectedMonth = month.number"
+                                :class="{ active: $store.photos.selectedMonth === month.number }"
                                 x-text="month.name"
                                 class="timeline-btn">
                             </button>
@@ -102,21 +816,27 @@
                     </div>
                 </div>
 
-                <div class="timeline-section" x-show="selectedYear || selectedMonth">
-                    <button @click="clearFilters()" class="clear-filters">
+                <div class="timeline-section" x-show="$store.photos.selectedYear || $store.photos.selectedMonth">
+                    <button @click="$store.photos.selectedYear = null; $store.photos.selectedMonth = null" class="clear-filters">
                         Clear Filters
                     </button>
                 </div>
             </aside>
 
             <!-- Photo Grid -->
-            <main class="photo-grid" @keydown.window="handleKeyboard">
-            <template x-for="photo in filteredPhotos" :key="photo.id">
-                <div 
-                    class="photo-item" 
-                    :class="{ selected: photo.id === selectedPhotoId }"
+            <main class="photo-grid"
+                  @keydown.enter.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
+                  @keydown.space.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
+                  @keydown.arrow-right.window.prevent="!$store.viewer.isOpen && gallerySelectNext()"
+                  @keydown.arrow-left.window.prevent="!$store.viewer.isOpen && gallerySelectPrevious()"
+                  @keydown.escape.window="!$store.viewer.isOpen && ($store.app.selectedPhotoIndex = null)"
+                  @keydown.f.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && toggleFavorite($store.app.selectedPhoto.id)">
+            <template x-for="photo in $store.photos.filteredPhotos" :key="photo.id">
+                <div
+                    class="photo-item"
+                    :class="{ selected: photo.id === $store.app.selectedPhoto?.id }"
                     @click="selectPhoto(photo.id)"
-                    @dblclick="openFullScreen(photo.id)"
+                    @dblclick="$store.viewer.open(photo.id)"
                     @focus="selectPhoto(photo.id)"
                     tabindex="0">
                     <img :src="photo.thumbnail" :alt="photo.name" loading="lazy">
@@ -247,17 +967,25 @@
         </div>
 
         <!-- Full-Screen Photo Viewer -->
-        <div x-show="fullScreenMode" class="photo-viewer-overlay" @keydown.window="handleFullScreenKeyboard">
+        <div x-show="$store.viewer.isOpen"
+             class="photo-viewer-overlay"
+             @keydown.escape.window="$store.viewer.isOpen && ($store.viewer.taggingMode ? $store.viewer.toggleTaggingMode() : $store.viewer.close())"
+             @keydown.arrow-left.window="$store.viewer.isOpen && $store.viewer.previous()"
+             @keydown.arrow-right.window="$store.viewer.isOpen && $store.viewer.next()"
+             @keydown.q.window="$store.viewer.isOpen && $store.viewer.close()"
+             @keydown.f.window.prevent="$store.viewer.isOpen && toggleFullScreenFavorite()"
+             @keydown.t.window.prevent="$store.viewer.isOpen && $store.viewer.toggleTaggingMode()"
+             @click.self="$store.viewer.close()">
             <div class="photo-viewer-header">
                 <div class="photo-viewer-info">
-                    <h3 x-text="currentPhoto?.name"></h3>
-                    <span x-text="`${currentPhotoIndex + 1} of ${filteredPhotos.length}`"></span>
+                    <h3 x-text="$store.viewer.currentPhoto?.name"></h3>
+                    <span x-text="`${$store.viewer.currentPhotoIndex + 1} of ${$store.photos.filteredPhotos.length}`"></span>
                 </div>
                 <div class="photo-viewer-controls">
                     <button
-                        @click="toggleTaggingMode"
+                        @click="$store.viewer.toggleTaggingMode()"
                         class="tag-btn"
-                        :class="{ active: taggingMode }"
+                        :class="{ active: $store.viewer.taggingMode }"
                         title="Tag Faces (T)">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                             <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L19 7V9L17 9V11L19 11V13L21 13V11L23 11V9M16 4C16 6.21 14.21 8 12 8C9.79 8 8 6.21 8 4C8 1.79 9.79 0 12 0C14.21 0 16 1.79 16 4Z"/>
@@ -266,60 +994,61 @@
                     <button
                         @click="toggleFullScreenFavorite"
                         class="favorite-heart-fullscreen"
-                        :class="{ active: currentPhoto?.favorite }"
+                        :class="{ active: $store.viewer.currentPhoto?.favorite }"
                         title="Favorite (F)">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
                             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                         </svg>
                     </button>
-                    <button @click="closeFullScreen" class="close-btn" title="Close (Esc or Q)">
+                    <button @click="$store.viewer.close()" class="close-btn" title="Close (Esc or Q)">
                         ✕
                     </button>
                 </div>
             </div>
             
             <div class="photo-viewer-content">
-                <button 
-                    @click="previousPhoto" 
+                <button
+                    @click="$store.viewer.previous()"
                     class="nav-btn nav-btn-left"
-                    :class="{ disabled: currentPhotoIndex === 0 }"
+                    :class="{ disabled: $store.viewer.currentPhotoIndex === 0 }"
                     title="Previous (Left Arrow)">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                         <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
                     </svg>
                 </button>
-                
+
                 <div class="photo-viewer-main">
                     <div
                         class="photo-container"
-                        :class="{ 'tagging-mode': taggingMode }"
+                        :class="{ 'tagging-mode': $store.viewer.taggingMode }"
                         style="position: relative; display: inline-block;"
-                        @mousedown="startDrawingTag($event)"
-                        @mousemove="updateDrawingTag($event)"
-                        @mouseup="finishDrawingTag($event)">
+                        @mousedown="$store.viewer.startDrawingTag($event)"
+                        @mousemove="$store.viewer.updateDrawingTag($event)"
+                        @mouseup="$store.viewer.finishDrawingTag($event)">
                         <img
-                            :src="currentPhoto ? `/api/photos/${encodeURIComponent(currentPhoto.name)}` : ''"
-                            :alt="currentPhoto?.name"
+                            :src="$store.viewer.currentPhoto ? `/api/photos/${encodeURIComponent($store.viewer.currentPhoto.name)}` : ''"
+                            :alt="$store.viewer.currentPhoto?.name"
                             class="full-screen-photo"
                             @click.stop
                             :draggable="false"
                             style="max-width: 100%; max-height: 80vh; display: block; user-select: none;">
 
-                        <!-- Face tag overlays -->
-                        <template x-for="tag in faceTags" :key="tag.id">
+                        <!-- Face tag overlays (only show in tagging mode) -->
+                        <template x-for="tag in $store.viewer.faceTags" :key="tag.id">
                             <div
+                                x-show="$store.viewer.taggingMode"
                                 class="face-tag-overlay"
                                 :style="`position: absolute; left: ${tag.x}%; top: ${tag.y}%; width: ${tag.width}%; height: ${tag.height}%; border: 2px solid #007AFF; background: rgba(0, 122, 255, 0.2); z-index: 10;`">
                                 <div class="face-tag-controls" style="position: absolute; top: -30px; left: 0; display: flex; gap: 5px;">
                                     <button
-                                        @click.stop="openTagAssignModal(tag.id)"
+                                        @click.stop="$store.tagging.openAssignModal(tag.id)"
                                         class="tag-assign-btn"
                                         :title="tag.personName || 'Assign Person'"
                                         style="background: #007AFF; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
                                         <span x-text="tag.personName || '+'"></span>
                                     </button>
                                     <button
-                                        @click.stop="removeTag(tag.id)"
+                                        @click.stop="$store.viewer.removeTag(tag.id)"
                                         class="tag-remove-btn"
                                         title="Remove Tag"
                                         style="background: #FF3B30; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 12px;">
@@ -330,40 +1059,40 @@
                         </template>
 
                         <!-- Drawing preview rectangle -->
-                        <div x-show="isDrawingTag && drawingPreview"
+                        <div x-show="$store.viewer.isDrawing && $store.viewer.drawingPreview"
                              class="drawing-preview"
-                             :style="`position: absolute; left: ${drawingPreview?.x || 0}%; top: ${drawingPreview?.y || 0}%; width: ${drawingPreview?.width || 0}%; height: ${drawingPreview?.height || 0}%; border: 2px dashed #FF9500; background: rgba(255, 149, 0, 0.2); z-index: 15; pointer-events: none;`">
+                             :style="`position: absolute; left: ${$store.viewer.drawingPreview?.x || 0}%; top: ${$store.viewer.drawingPreview?.y || 0}%; width: ${$store.viewer.drawingPreview?.width || 0}%; height: ${$store.viewer.drawingPreview?.height || 0}%; border: 2px dashed #FF9500; background: rgba(255, 149, 0, 0.2); z-index: 15; pointer-events: none;`">
                         </div>
 
                         <!-- First click indicator for click-click mode -->
-                        <div x-show="isDrawingTag && (!drawingPreview || (drawingPreview?.width === 0 && drawingPreview?.height === 0))"
+                        <div x-show="$store.viewer.isDrawing && (!$store.viewer.drawingPreview || ($store.viewer.drawingPreview?.width === 0 && $store.viewer.drawingPreview?.height === 0))"
                              class="first-click-indicator"
-                             :style="`position: absolute; left: calc(${drawingPreview?.x || 0}% - 4px); top: calc(${drawingPreview?.y || 0}% - 4px); width: 8px; height: 8px; background: #FF9500; border: 2px solid white; border-radius: 50%; z-index: 16; pointer-events: none;`">
+                             :style="`position: absolute; left: calc(${$store.viewer.drawingPreview?.x || 0}% - 4px); top: calc(${$store.viewer.drawingPreview?.y || 0}% - 4px); width: 8px; height: 8px; background: #FF9500; border: 2px solid white; border-radius: 50%; z-index: 16; pointer-events: none;`">
                         </div>
 
                         <!-- Tagging instructions -->
-                        <div x-show="taggingMode && faceTags.length === 0" class="tagging-instructions"
+                        <div x-show="$store.viewer.taggingMode && $store.viewer.faceTags.length === 0" class="tagging-instructions"
                              style="position: absolute; top: 20px; left: 20px; background: rgba(0, 0, 0, 0.7); color: white; padding: 10px; border-radius: 5px; z-index: 20;">
                             <p style="margin: 0; font-size: 14px;">Draw a box around a face:</p>
                             <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.8;">Click one corner, then click the opposite corner</p>
                             <p style="margin: 5px 0 0 0; font-size: 12px; opacity: 0.6;">Press 'T' to exit tagging mode</p>
                         </div>
 
-                        <!-- Save button when tags exist -->
-                        <div x-show="taggingMode && faceTags.length > 0" class="tagging-save"
+                        <!-- Done button to exit tagging mode -->
+                        <div x-show="$store.viewer.taggingMode" class="tagging-done"
                              style="position: absolute; bottom: 20px; right: 20px; z-index: 20;">
-                            <button @click.stop="saveFaceTags()" class="save-tags-btn"
-                                    style="background: #34C759; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold;">
-                                Save Tags
+                            <button @click.stop="$store.viewer.toggleTaggingMode()" class="done-tagging-btn"
+                                    style="background: #34C759; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer;">
+                                Done Tagging
                             </button>
                         </div>
                     </div>
                 </div>
                 
-                <button 
-                    @click="nextPhoto" 
+                <button
+                    @click="$store.viewer.next()"
                     class="nav-btn nav-btn-right"
-                    :class="{ disabled: currentPhotoIndex === filteredPhotos.length - 1 }"
+                    :class="{ disabled: $store.viewer.currentPhotoIndex === $store.photos.filteredPhotos.length - 1 }"
                     title="Next (Right Arrow)">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                         <path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/>
@@ -374,17 +1103,17 @@
         </div>
 
         <!-- Tag Assignment Modal -->
-        <div x-show="showTagAssignModal" class="modal-overlay" @click.self="closeTagAssignModal()">
+        <div x-show="$store.tagging.showAssignModal" class="modal-overlay" @click.self="$store.tagging.closeAssignModal()">
             <div class="modal">
                 <div class="modal-header">
                     <h3>Assign Person to Face Tag</h3>
-                    <button @click="closeTagAssignModal()" class="close-btn">✕</button>
+                    <button @click="$store.tagging.closeAssignModal()" class="close-btn">✕</button>
                 </div>
                 <div class="modal-body">
                     <div class="person-list" style="max-height: 300px; overflow-y: auto;">
-                        <template x-for="person in people" :key="person.id">
+                        <template x-for="person in $store.people.all" :key="person.id">
                             <button
-                                @click="assignPersonToTag(person.id, person.name)"
+                                @click="$store.tagging.assignPersonToTag(person.id, person.name)"
                                 class="person-assign-btn"
                                 style="display: block; width: 100%; text-align: left; padding: 10px; margin-bottom: 5px; border: 1px solid #ddd; border-radius: 5px; background: white; color: #333; cursor: pointer; transition: background-color 0.2s;"
                                 @mouseover="$el.style.backgroundColor = '#f0f0f0'"
@@ -393,7 +1122,7 @@
                             </button>
                         </template>
 
-                        <div x-show="people.length === 0" style="text-align: center; padding: 20px; color: #666;">
+                        <div x-show="$store.people.all.length === 0" style="text-align: center; padding: 20px; color: #666;">
                             <p>No people available. Add people first in the People tab.</p>
                         </div>
                     </div>

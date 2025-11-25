@@ -1,3 +1,12 @@
+// ⚠️ DEPRECATED: This Router class is no longer used.
+// All routing functionality has been moved to Alpine.store('app') in public/index.html
+//
+// Key methods now in Alpine store:
+// - handleRoute() - handles URL changes and browser navigation
+// - updateUrl() - updates browser URL based on current state
+// - openPhotoWhenReady() - opens photo when data is loaded
+//
+// This file is kept for reference but may be deleted in the future.
 export class Router {
     constructor(app) {
         this.app = app;
@@ -23,35 +32,32 @@ export class Router {
             // Route: /gallery/{gallery}/photo/{photoId}
             const [, gallery, photoIdStr] = galleryPhotoMatch;
             const photoId = parseInt(photoIdStr, 10);
-            if (typeof Alpine !== 'undefined') {
-                Alpine.store('app').currentView = 'photos';
-            }
+            Alpine.store('app').currentView = 'photos';
             this.app.setCurrentGallery(gallery);
-            this.app.openFullScreenFromRoute(photoId);
+            console.log('DEBUG: Navigating to photo ID', photoId, 'in gallery', gallery);
+            // Open fullscreen via Alpine store
+            Alpine.store('viewer').open(photoId);
         }
         else if (galleryMatch) {
             // Route: /gallery/{gallery}
             const [, gallery] = galleryMatch;
-            if (typeof Alpine !== 'undefined') {
-                Alpine.store('app').currentView = 'photos';
-            }
+            Alpine.store('app').currentView = 'photos';
             this.app.setCurrentGallery(gallery);
-            this.app.closeFullScreen();
+            // Close viewer via Alpine store
+            Alpine.store('viewer').close();
         }
         else if (path === '/people') {
             // Route: /people
-            if (typeof Alpine !== 'undefined') {
-                Alpine.store('app').currentView = 'people';
-            }
-            this.app.closeFullScreen();
+            Alpine.store('app').currentView = 'people';
+            // Close viewer via Alpine store
+            Alpine.store('viewer').close();
         }
         else if (path === '/') {
             // Route: / (default to 'all' gallery)
-            if (typeof Alpine !== 'undefined') {
-                Alpine.store('app').currentView = 'photos';
-            }
+            Alpine.store('app').currentView = 'photos';
             this.app.setCurrentGallery('all');
-            this.app.closeFullScreen();
+            // Close viewer via Alpine store
+            Alpine.store('viewer').close();
         }
         else {
             // Unknown route, redirect to gallery
@@ -85,12 +91,18 @@ export class Router {
     }
     navigateToGallery() {
         this.app.setCurrentView('photos');
-        this.app.setFullScreenMode(false);
+        // Close viewer via Alpine store
+        if (typeof Alpine !== "undefined") {
+            Alpine.store('viewer').close();
+        }
         this.updateUrl(false, this.app.getCurrentGallery(), null);
     }
     navigateToPeople() {
         this.app.setCurrentView('people');
-        this.app.closeFullScreen();
+        // Close viewer via Alpine store
+        if (typeof Alpine !== "undefined") {
+            Alpine.store('viewer').close();
+        }
         this.updateUrl(false, this.app.getCurrentGallery(), null);
     }
 }

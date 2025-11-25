@@ -1,7 +1,6 @@
 import { Photo, Month, MobileTimelineView, Person } from "./types.js";
-import { Router } from "./router.js";
 import { FullscreenViewer } from "./fullscreen-viewer.js";
-import { KeyboardHandler } from "./keyboard-handler.js";
+// Router and KeyboardHandler are deprecated - functionality moved to Alpine stores in index.html
 
 // Alpine.js global type declaration
 declare const Alpine: any;
@@ -122,18 +121,15 @@ function generateMockPhotos(): Photo[] {
 // Alpine.js compatibility class for components that need instance methods
 // This is a minimal shim that allows existing components to work while
 // the actual state is managed by Alpine.js reactive data
+// NOTE: Router and KeyboardHandler removed - functionality moved to Alpine stores
 export class TidyPhotosApp {
   viewer: FullscreenViewer;
-  keyboardHandler: KeyboardHandler;
-  router: Router;
 
   // Reference to Alpine data (set after creation)
   private alpineData: any = null;
 
   constructor() {
     this.viewer = new FullscreenViewer(this);
-    this.keyboardHandler = new KeyboardHandler(this);
-    this.router = new Router(this);
   }
 
   setAlpineData(data: any): void {
@@ -143,14 +139,6 @@ export class TidyPhotosApp {
   // Component getters
   getViewer(): FullscreenViewer {
     return this.viewer;
-  }
-
-  getKeyboardHandler(): KeyboardHandler {
-    return this.keyboardHandler;
-  }
-
-  getRouter(): Router {
-    return this.router;
   }
 
   // Compatibility methods that delegate to Alpine data
@@ -171,8 +159,8 @@ export class TidyPhotosApp {
   }
 
   getCurrentView(): string {
-    if (typeof Alpine !== 'undefined') {
-      return Alpine.store('app').currentView;
+    if (typeof Alpine !== "undefined") {
+      return Alpine.store("app").currentView;
     }
     return "photos";
   }
@@ -182,13 +170,26 @@ export class TidyPhotosApp {
   }
 
   getFilteredPhotos(): Photo[] {
-    if (!this.alpineData) return [];
-    return filterPhotos(
+    if (!this.alpineData) {
+      console.log(
+        "🔍 DEBUG: getFilteredPhotos() - alpineData is null, returning []",
+      );
+      return [];
+    }
+    const filtered = filterPhotos(
       this.alpineData.photos,
       this.alpineData.searchQuery,
       this.alpineData.selectedYear,
       this.alpineData.selectedMonth,
     );
+    console.log(
+      "🔍 DEBUG: getFilteredPhotos() returning",
+      filtered.length,
+      "photos from",
+      this.alpineData.photos.length,
+      "total",
+    );
+    return filtered;
   }
 
   // Methods that mutate Alpine state
@@ -210,30 +211,13 @@ export class TidyPhotosApp {
 
   setCurrentView(view: "photos" | "people"): void {
     // Use Alpine.store for global state management
-    if (typeof Alpine !== 'undefined') {
-      Alpine.store('app').currentView = view;
+    if (typeof Alpine !== "undefined") {
+      Alpine.store("app").currentView = view;
     }
   }
 
-  setFullScreenMode(fullScreen: boolean): void {
-    if (!fullScreen) {
-      this.viewer.closeFullScreen();
-    }
-  }
-
-  closeFullScreen(): void {
-    this.viewer.closeFullScreen();
-    if (this.alpineData) {
-      this.alpineData.syncViewerState();
-    }
-  }
-
-  openFullScreenFromRoute(photoId: number): void {
-    this.viewer.openFullScreenFromRoute(photoId);
-    if (this.alpineData) {
-      this.alpineData.syncViewerState();
-    }
-  }
+  // DEPRECATED: These methods removed - fullscreen handled by Alpine store
+  // setFullScreenMode, closeFullScreen, openFullScreenFromRoute
 
   async toggleFavorite(photoId: number): Promise<void> {
     if (this.alpineData) {
@@ -255,8 +239,15 @@ export class TidyPhotosApp {
 
   // Stub for legacy PhotoManager interface
   getPhotoManager(): any {
+    const photos = this.alpineData?.photos ?? [];
+    const isLoading = this.alpineData?.loading;
+    console.log("🔍 DEBUG: getPhotoManager() called, returning:", {
+      photosCount: photos.length,
+      isLoading: isLoading,
+    });
     return {
-      allPhotos: this.alpineData?.photos ?? [],
+      allPhotos: photos,
+      isLoading: isLoading,
       toggleFavorite: (photoId: number) => this.toggleFavorite(photoId),
     };
   }
@@ -289,22 +280,22 @@ window.photoApp = function(): any {
 
     // UI state (reactive)
     searchQuery: "",
-    selectedPhotoId: null as number | null,
+    // selectedPhotoId REMOVED - now in Alpine.store('app').selectedPhotoIndex
     // currentView moved to Alpine.store('app')
     thumbnailSize: 200,
 
     // Fullscreen state (reactive - synced with viewer)
     fullScreenMode: false,
-    currentPhoto: null as Photo | null,
-    currentPhotoIndex: 0,
+    // currentPhoto REMOVED - now in Alpine.store('app').selectedPhoto
+    // currentPhotoIndex REMOVED - now in Alpine.store('app').selectedPhotoIndex
 
-    // Face tagging state (reactive - synced with viewer)
-    taggingMode: false,
-    faceTags: [] as any[],
-    showTagAssignModal: false,
-    selectedTagId: null as number | null,
-    isDrawingTag: false,
-    drawingPreview: null as any,
+    // Face tagging state REMOVED - now in Alpine.store('viewer') and Alpine.store('tagging')
+    // - taggingMode → Alpine.store('viewer').taggingMode
+    // - faceTags → Alpine.store('viewer').faceTags
+    // - showTagAssignModal → Alpine.store('tagging').showAssignModal
+    // - selectedTagId → Alpine.store('tagging').selectedTagId
+    // - isDrawingTag → Alpine.store('viewer').isDrawing
+    // - drawingPreview → Alpine.store('viewer').drawingPreview
 
     // Computed properties
     get years(): number[] {
@@ -327,6 +318,7 @@ window.photoApp = function(): any {
     // Initialization
     async init() {
       console.log("🚀 TidyPhotos: Initializing...");
+      console.log("🔍 DEBUG: init() started");
 
       // Load thumbnail size from localStorage
       const savedSize = localStorage.getItem("tidyphotos-thumbnail-size");
@@ -339,10 +331,14 @@ window.photoApp = function(): any {
       }
 
       // Load photos from API
+      console.log("🔍 DEBUG: About to call loadPhotos()");
       await this.loadPhotos();
+      console.log(
+        "🔍 DEBUG: loadPhotos() completed, photos.length =",
+        this.photos.length,
+      );
 
-      // Initialize router
-      appInstance!.router.handleInitialRoute();
+      // Router initialization REMOVED - now handled by Alpine.store('app').handleRoute()
 
       console.log("✅ TidyPhotos: Initialization complete");
     },
@@ -350,6 +346,7 @@ window.photoApp = function(): any {
     // Photo loading
     async loadPhotos() {
       console.log("📡 TidyPhotos: Loading photos from API...");
+      console.log("🔍 DEBUG: loadPhotos() started, loading =", this.loading);
       try {
         const response = await fetch("/api/photos");
         const data = await response.json();
@@ -361,32 +358,106 @@ window.photoApp = function(): any {
 
         this.photos = data as Photo[];
         this.loading = false;
+
+        // Sync to Alpine store
+        if (typeof Alpine !== "undefined") {
+          Alpine.store("photos").all = this.photos;
+          Alpine.store("photos").loading = this.loading;
+        }
+
         console.log("✅ TidyPhotos: Photos loaded successfully");
+        console.log(
+          "🔍 DEBUG: Loaded",
+          this.photos.length,
+          "photos, loading =",
+          this.loading,
+        );
       } catch (error) {
         console.error("❌ TidyPhotos: Failed to load photos:", error);
         this.photos = generateMockPhotos();
         this.loading = false;
+
+        // Sync to Alpine store
+        if (typeof Alpine !== "undefined") {
+          Alpine.store("photos").all = this.photos;
+          Alpine.store("photos").loading = this.loading;
+        }
+
+        console.log(
+          "🔍 DEBUG: Using mock photos, count =",
+          this.photos.length,
+          ", loading =",
+          this.loading,
+        );
       }
     },
 
-    // Photo selection
+    // Photo selection (migrated to Alpine store)
     selectPhoto(photoId: number) {
-      this.selectedPhotoId = photoId;
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectPhotoById(photoId);
+      }
+    },
+
+    // Gallery navigation (migrated from KeyboardHandler)
+    gallerySelectNext() {
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectNext();
+        this.scrollSelectedIntoView();
+      }
+    },
+
+    gallerySelectPrevious() {
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectPrevious();
+        this.scrollSelectedIntoView();
+      }
+    },
+
+    scrollSelectedIntoView() {
+      setTimeout(() => {
+        const selectedElement = document.querySelector(".photo-item.selected");
+        if (selectedElement) {
+          selectedElement.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          });
+          // Sync focus with selection
+          (selectedElement as HTMLElement).focus();
+        }
+      }, 0);
     },
 
     // Timeline methods
     selectYear(year: number) {
       this.selectedYear = year;
       this.selectedMonth = null;
+
+      // Sync to Alpine store
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectedYear = year;
+        Alpine.store("photos").selectedMonth = null;
+      }
     },
 
     selectMonth(month: number) {
       this.selectedMonth = month;
+
+      // Sync to Alpine store
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectedMonth = month;
+      }
     },
 
     clearFilters() {
       this.selectedYear = null;
       this.selectedMonth = null;
+
+      // Sync to Alpine store
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("photos").selectedYear = null;
+        Alpine.store("photos").selectedMonth = null;
+      }
     },
 
     setMobileView(view: MobileTimelineView) {
@@ -456,64 +527,37 @@ window.photoApp = function(): any {
       return formatDate(dateString);
     },
 
-    // Fullscreen methods
-    async openFullScreen(photoId: number) {
-      await appInstance!.viewer.openFullScreen(photoId);
-      this.syncViewerState();
-    },
+    // Fullscreen methods DEPRECATED - now handled by Alpine.store('viewer') in index.html
 
-    openFullScreenFromRoute(photoId: number) {
-      appInstance!.viewer.openFullScreenFromRoute(photoId);
-      this.syncViewerState();
-    },
-
-    closeFullScreen() {
-      appInstance!.viewer.closeFullScreen();
-      this.syncViewerState();
-    },
-
-    async nextPhoto() {
-      await appInstance!.viewer.nextPhoto();
-      this.syncViewerState();
-    },
-
-    async previousPhoto() {
-      await appInstance!.viewer.previousPhoto();
-      this.syncViewerState();
-    },
-
+    // TODO: Migrate to Alpine store
     async toggleFullScreenFavorite() {
       await appInstance!.viewer.toggleFavorite();
-      this.syncViewerState();
+      // this.syncViewerState();
       // Also update the photo in the main photos array
       await this.loadPhotos();
     },
 
     // Sync viewer state to Alpine reactive properties
+    // NOTE: Photo selection state (currentPhoto, currentPhotoIndex) NOT synced - now in app store
+    // NOTE: Face tagging state NOT synced - now managed by Alpine stores directly
     syncViewerState() {
+      console.log("🔄 syncViewerState() - Syncing viewer-specific state");
+
       this.fullScreenMode = appInstance!.viewer.isFullScreen;
-      this.currentPhoto = appInstance!.viewer.currentPhoto
-        ? { ...appInstance!.viewer.currentPhoto }
-        : null;
-      this.currentPhotoIndex = appInstance!.viewer.photoIndex;
-      this.taggingMode = appInstance!.viewer.isTaggingMode;
-      this.faceTags = appInstance!.viewer.faceTags.map((tag) => ({ ...tag }));
-      this.isDrawingTag = appInstance!.viewer.isDrawing;
-      this.drawingPreview = appInstance!.viewer.drawingPreview
-        ? { ...appInstance!.viewer.drawingPreview }
-        : null;
+      // currentPhoto and currentPhotoIndex NOT synced - read from app store
+      // Face tagging state NOT synced - now in Alpine.store('viewer') and Alpine.store('tagging')
+
+      // Sync to Alpine store (viewer-specific state only)
+      if (typeof Alpine !== "undefined") {
+        Alpine.store("viewer").isOpen = this.fullScreenMode;
+        // Tagging state NOT synced - Alpine stores are source of truth
+      }
     },
 
-    // Keyboard handlers
-    handleKeyboard(event: KeyboardEvent) {
-      appInstance!.keyboardHandler.handleGalleryKeyboard(event);
-      this.syncViewerState();
-    },
-
-    handleFullScreenKeyboard(event: KeyboardEvent) {
-      appInstance!.viewer.handleKeyboard(event);
-      this.syncViewerState();
-    },
+    // Keyboard handlers - DEPRECATED: Now handled by Alpine directives in index.html
+    // handleKeyboard(event: KeyboardEvent) {
+    //   // Keyboard handling moved to Alpine directives
+    // },
 
     // Thumbnail size
     updateThumbnailSize(size: string) {
@@ -528,65 +572,23 @@ window.photoApp = function(): any {
     // View management
     setCurrentView(view: "photos" | "people") {
       // Update global Alpine store
-      Alpine.store('app').currentView = view;
+      Alpine.store("app").currentView = view;
       // Update URL when view changes
-      appInstance!
-        .getRouter()
-        .updateUrl(this.fullScreenMode, "all", this.currentPhoto);
+      Alpine.store("app").updateUrl();
     },
 
-    // Face tagging methods
-    toggleTaggingMode() {
-      appInstance!.viewer.toggleTaggingMode();
-      this.syncViewerState();
-    },
+    // Face tagging methods REMOVED - now handled by Alpine stores
+    // All tagging functionality has been migrated to Alpine.js stores in public/index.html:
+    // - toggleTaggingMode() → Alpine.store('viewer').toggleTaggingMode()
+    // - startDrawingTag() → Alpine.store('viewer').startDrawingTag()
+    // - updateDrawingTag() → Alpine.store('viewer').updateDrawingTag()
+    // - finishDrawingTag() → Alpine.store('viewer').finishDrawingTag()
+    // - removeTag() → Alpine.store('viewer').removeTag()
+    // - openTagAssignModal() → Alpine.store('tagging').openAssignModal()
+    // - assignPersonToTag() → Alpine.store('tagging').assignPersonToTag()
+    // - closeTagAssignModal() → Alpine.store('tagging').closeAssignModal()
+    // - saveFaceTags() → Alpine.store('viewer').toggleTaggingMode()
 
-    startDrawingTag(event: MouseEvent) {
-      appInstance!.viewer.startDrawingTag(event);
-      this.syncViewerState();
-    },
-
-    updateDrawingTag(event: MouseEvent) {
-      appInstance!.viewer.updateDrawingTag(event);
-      this.syncViewerState();
-    },
-
-    finishDrawingTag(event: MouseEvent) {
-      appInstance!.viewer.finishDrawingTag(event);
-      this.syncViewerState();
-    },
-
-    removeTag(tagId: number) {
-      appInstance!.viewer.removeTag(tagId);
-      this.syncViewerState();
-    },
-
-    openTagAssignModal(tagId: number) {
-      this.selectedTagId = tagId;
-      this.showTagAssignModal = true;
-    },
-
-    assignPersonToTag(personId: number, personName: string) {
-      if (this.selectedTagId) {
-        appInstance!.viewer.assignPersonToTag(
-          this.selectedTagId,
-          personId,
-          personName,
-        );
-        this.closeTagAssignModal();
-        this.syncViewerState();
-      }
-    },
-
-    closeTagAssignModal() {
-      this.showTagAssignModal = false;
-      this.selectedTagId = null;
-    },
-
-    async saveFaceTags() {
-      await appInstance!.viewer.saveFaceTags();
-      this.syncViewerState();
-    },
   };
 
   // Connect Alpine data to app instance for compatibility
