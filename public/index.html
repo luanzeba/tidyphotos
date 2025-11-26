@@ -130,6 +130,12 @@
                     }
                 },
 
+                // Set current view and update URL
+                setCurrentView(view) {
+                    this.currentView = view;
+                    this.updateUrl();
+                },
+
                 // Update browser URL based on current state
                 updateUrl() {
                     let newPath;
@@ -161,6 +167,58 @@
                 selectedYear: null,
                 selectedMonth: null,
                 searchQuery: '',
+                thumbnailSize: 200,
+                mobileTimelineView: 'all',
+
+                // Initialize store - load thumbnail size from localStorage
+                init() {
+                    const savedSize = localStorage.getItem('tidyphotos-thumbnail-size');
+                    if (savedSize) {
+                        this.thumbnailSize = parseInt(savedSize);
+                        document.documentElement.style.setProperty('--thumbnail-size', savedSize + 'px');
+                    }
+                },
+
+                // Update thumbnail size - updates CSS variable and localStorage
+                updateThumbnailSize(size) {
+                    this.thumbnailSize = parseInt(size);
+                    document.documentElement.style.setProperty('--thumbnail-size', size + 'px');
+                    localStorage.setItem('tidyphotos-thumbnail-size', size);
+                    console.log('📏 Thumbnail size updated to', size + 'px');
+                },
+
+                // Set mobile timeline view (years/months/all)
+                setMobileView(view) {
+                    this.mobileTimelineView = view;
+                    if (view === 'all') {
+                        this.selectedYear = null;
+                        this.selectedMonth = null;
+                    }
+                },
+
+                // Load photos from API
+                async loadPhotos() {
+                    console.log('📡 Photos Store: Loading photos from API...');
+                    this.loading = true;
+
+                    try {
+                        const response = await fetch('/api/photos');
+                        if (!response.ok) {
+                            throw new Error(`API error: ${response.status} ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+                        this.all = data;
+                        this.loading = false;
+
+                        console.log('✅ Photos Store: Loaded', this.all.length, 'photos');
+                    } catch (error) {
+                        console.error('❌ Photos Store: Failed to load photos:', error);
+                        // Keep empty array on error, don't use mock data
+                        this.all = [];
+                        this.loading = false;
+                    }
+                },
 
                 // Toggle favorite status with optimistic updates
                 async toggleFavorite(photoId) {
@@ -197,6 +255,47 @@
                         photo.favorite = originalState;
                         console.error('❌ Network error while updating favorite, reverting UI:', error);
                     }
+                },
+
+                // Computed getter for available years (from photo dates)
+                get years() {
+                    const yearSet = new Set();
+                    this.all.forEach(photo => {
+                        if (photo.date) {
+                            const date = new Date(photo.date);
+                            if (!isNaN(date.getTime())) {
+                                yearSet.add(date.getFullYear());
+                            }
+                        }
+                    });
+                    return Array.from(yearSet).sort((a, b) => b - a);
+                },
+
+                // Computed getter for available months (for selected year)
+                get months() {
+                    if (!this.selectedYear) return [];
+
+                    const monthNames = [
+                        'January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'
+                    ];
+
+                    const monthSet = new Set();
+                    this.all.forEach(photo => {
+                        if (photo.date) {
+                            const date = new Date(photo.date);
+                            if (!isNaN(date.getTime()) && date.getFullYear() === this.selectedYear) {
+                                monthSet.add(date.getMonth());
+                            }
+                        }
+                    });
+
+                    return Array.from(monthSet)
+                        .sort((a, b) => b - a)
+                        .map(month => ({
+                            number: month,
+                            name: monthNames[month]
+                        }));
                 },
 
                 // Computed getter for filtered photos
@@ -757,6 +856,12 @@
             // Handle initial route immediately
             Alpine.store('app').handleRoute();
 
+            // Initialize photos store (load thumbnail size from localStorage)
+            Alpine.store('photos').init();
+
+            // Load photos data
+            Alpine.store('photos').loadPhotos();
+
             // Load people data globally (needed for tag assignment)
             Alpine.store('people').loadPeople();
 
@@ -772,30 +877,27 @@
         });
     </script>
 
-    <!-- Load main app first -->
-    <script type="module" src="/js/dist/tidyphotos-app.js"></script>
-
-    <!-- Load self-contained managers -->
+    <!-- Load People Manager (self-contained x-data component) -->
     <script type="module" src="/js/dist/people-manager.js"></script>
 
-    <!-- Load Alpine.js after -->
+    <!-- Load Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
-    <div x-data="photoApp()" x-init="init()" class="app">
+    <div x-data="{}" class="app">
         <!-- Header -->
         <header class="header">
             <div class="header-left">
                 <h1>TidyPhotos</h1>
                 <nav class="nav-tabs">
                     <button
-                        @click="setCurrentView('photos')"
+                        @click="$store.app.setCurrentView('photos')"
                         :class="{ active: $store.app.currentView === 'photos' }"
                         class="nav-tab">
                         Photos
                     </button>
                     <button
-                        @click="setCurrentView('people')"
+                        @click="$store.app.setCurrentView('people')"
                         :class="{ active: $store.app.currentView === 'people' }"
                         class="nav-tab">
                         People
@@ -811,10 +913,10 @@
                         min="120"
                         max="400"
                         step="20"
-                        x-model="thumbnailSize"
-                        @input="updateThumbnailSize($event.target.value)"
+                        x-model="$store.photos.thumbnailSize"
+                        @input="$store.photos.updateThumbnailSize($event.target.value)"
                         class="thumbnail-size-slider">
-                    <span x-text="thumbnailSize + 'px'" class="thumbnail-size-value"></span>
+                    <span x-text="$store.photos.thumbnailSize + 'px'" class="thumbnail-size-value"></span>
                 </div>
                 <input type="search" x-model="$store.photos.searchQuery" placeholder="Search photos..." class="search">
             </div>
@@ -828,7 +930,7 @@
                 <div class="timeline-section">
                     <h3>Years</h3>
                     <div class="timeline-buttons">
-                        <template x-for="year in years" :key="year">
+                        <template x-for="year in $store.photos.years" :key="year">
                             <button
                                 @click="$store.photos.selectedYear = year; $store.photos.selectedMonth = null"
                                 :class="{ active: $store.photos.selectedYear === year }"
@@ -842,7 +944,7 @@
                 <div class="timeline-section" x-show="$store.photos.selectedYear">
                     <h3>Months</h3>
                     <div class="timeline-buttons">
-                        <template x-for="month in months" :key="month.number">
+                        <template x-for="month in $store.photos.months" :key="month.number">
                             <button
                                 @click="$store.photos.selectedMonth = month.number"
                                 :class="{ active: $store.photos.selectedMonth === month.number }"
@@ -864,17 +966,17 @@
             <main class="photo-grid"
                   @keydown.enter.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
                   @keydown.space.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
-                  @keydown.arrow-right.window.prevent="!$store.viewer.isOpen && gallerySelectNext()"
-                  @keydown.arrow-left.window.prevent="!$store.viewer.isOpen && gallerySelectPrevious()"
+                  @keydown.arrow-right.window.prevent="!$store.viewer.isOpen && $store.photos.selectNext()"
+                  @keydown.arrow-left.window.prevent="!$store.viewer.isOpen && $store.photos.selectPrevious()"
                   @keydown.escape.window="!$store.viewer.isOpen && ($store.app.selectedPhotoIndex = null)"
                   @keydown.f.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.photos.toggleFavorite($store.app.selectedPhoto.id)">
             <template x-for="photo in $store.photos.filteredPhotos" :key="photo.id">
                 <div
                     class="photo-item"
                     :class="{ selected: photo.id === $store.app.selectedPhoto?.id }"
-                    @click="selectPhoto(photo.id)"
+                    @click="$store.photos.selectPhotoById(photo.id)"
                     @dblclick="$store.viewer.open(photo.id)"
-                    @focus="selectPhoto(photo.id)"
+                    @focus="$store.photos.selectPhotoById(photo.id)"
                     tabindex="0">
                     <img :src="photo.thumbnail" :alt="photo.name" loading="lazy">
                     <button class="favorite-heart" :class="{ active: photo.favorite }" @click.stop="$store.photos.toggleFavorite(photo.id)" tabindex="-1">
@@ -884,30 +986,30 @@
                     </button>
                 </div>
             </template>
-            
+
             <!-- Loading State -->
-            <div x-show="loading" class="loading">
+            <div x-show="$store.photos.loading" class="loading">
                 Loading photos...
             </div>
         </main>
         
         <!-- Mobile Bottom Timeline Slider -->
         <div class="mobile-timeline-slider">
-            <button 
-                @click="setMobileView('years')" 
-                :class="{ active: mobileTimelineView === 'years' }"
+            <button
+                @click="$store.photos.setMobileView('years')"
+                :class="{ active: $store.photos.mobileTimelineView === 'years' }"
                 class="mobile-timeline-btn">
                 Years
             </button>
-            <button 
-                @click="setMobileView('months')" 
-                :class="{ active: mobileTimelineView === 'months' }"
+            <button
+                @click="$store.photos.setMobileView('months')"
+                :class="{ active: $store.photos.mobileTimelineView === 'months' }"
                 class="mobile-timeline-btn">
                 Months
             </button>
-            <button 
-                @click="setMobileView('all')" 
-                :class="{ active: mobileTimelineView === 'all' }"
+            <button
+                @click="$store.photos.setMobileView('all')"
+                :class="{ active: $store.photos.mobileTimelineView === 'all' }"
                 class="mobile-timeline-btn">
                 All
             </button>
@@ -1140,7 +1242,9 @@
         </div>
 
         <!-- Tag Assignment Modal -->
-        <div x-show="$store.tagging.showAssignModal" class="modal-overlay" @click.self="$store.tagging.closeAssignModal()">
+        <div x-show="$store.tagging.showAssignModal"
+             class="modal-overlay"
+             @click.self="$store.tagging.closeAssignModal()">
             <div class="modal">
                 <div class="modal-header">
                     <h3>Assign Person to Face Tag</h3>
