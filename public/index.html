@@ -848,10 +848,147 @@
                         this.all = [];
                         this.loading = false;
                     }
+                },
+
+                async addPerson(name) {
+                    try {
+                        const response = await fetch('/api/people', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name })
+                        });
+                        if (!response.ok) {
+                            throw new Error(`Failed to add: ${response.statusText}`);
+                        }
+
+                        const newPerson = await response.json();
+                        this.all.push(newPerson);
+                        console.log('✅ Added person:', newPerson.name);
+                        return true;
+                    } catch (error) {
+                        console.error('❌ Error adding person:', error);
+                        return false;
+                    }
+                },
+
+                async updatePerson(id, name) {
+                    try {
+                        const response = await fetch(`/api/people/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name })
+                        });
+                        if (!response.ok) {
+                            throw new Error(`Failed to update: ${response.statusText}`);
+                        }
+
+                        const updatedPerson = await response.json();
+                        const index = this.all.findIndex(p => p.id === id);
+                        if (index !== -1) {
+                            this.all[index] = updatedPerson;
+                            console.log('✅ Updated person:', updatedPerson.name);
+                        }
+                        return true;
+                    } catch (error) {
+                        console.error('❌ Error updating person:', error);
+                        return false;
+                    }
+                },
+
+                async deletePerson(id) {
+                    try {
+                        const response = await fetch(`/api/people/${id}`, {
+                            method: 'DELETE'
+                        });
+                        if (!response.ok) {
+                            throw new Error(`Failed to delete: ${response.statusText}`);
+                        }
+
+                        this.all = this.all.filter(p => p.id !== id);
+                        console.log('✅ Deleted person ID:', id);
+                        return true;
+                    } catch (error) {
+                        console.error('❌ Error deleting person:', error);
+                        return false;
+                    }
                 }
             });
 
-            console.log('✅ Alpine stores initialized: app, photos, viewer, tagging, people');
+            // People view form/modal state
+            Alpine.store('peopleForm', {
+                showAddModal: false,
+                showEditModal: false,
+                personForm: { id: null, name: '' },
+
+                // Open add person modal
+                openAddModal() {
+                    this.personForm = { id: null, name: '' };
+                    this.showAddModal = true;
+                    console.log('📝 Opened add person modal');
+                },
+
+                // Open edit person modal
+                openEditModal(person) {
+                    this.personForm = { id: person.id, name: person.name };
+                    this.showEditModal = true;
+                    console.log('📝 Opened edit person modal for:', person.name);
+                },
+
+                // Close modals and reset form
+                closeModal() {
+                    this.showAddModal = false;
+                    this.showEditModal = false;
+                    this.personForm = { id: null, name: '' };
+                    console.log('📝 Closed modal and reset form');
+                },
+
+                // Submit add person form
+                async submitAdd() {
+                    if (!this.personForm.name || this.personForm.name.trim() === '') {
+                        console.error('❌ Person name is required');
+                        return;
+                    }
+
+                    const success = await Alpine.store('people').addPerson(this.personForm.name.trim());
+                    if (success) {
+                        this.closeModal();
+                    }
+                },
+
+                // Submit update person form
+                async submitUpdate() {
+                    if (!this.personForm.name || this.personForm.name.trim() === '') {
+                        console.error('❌ Person name is required');
+                        return;
+                    }
+
+                    const success = await Alpine.store('people').updatePerson(
+                        this.personForm.id,
+                        this.personForm.name.trim()
+                    );
+                    if (success) {
+                        this.closeModal();
+                    }
+                },
+
+                // Submit delete person (with confirmation)
+                async submitDelete(person) {
+                    if (!confirm(`Are you sure you want to delete "${person.name}"?`)) {
+                        console.log('❌ Delete cancelled by user');
+                        return;
+                    }
+
+                    const success = await Alpine.store('people').deletePerson(person.id);
+                    if (success) {
+                        // If modal is open, close it
+                        if (this.showEditModal) {
+                            this.closeModal();
+                        }
+                    }
+                }
+            });
+
+            console.log('✅ Alpine stores initialized: app, photos, viewer, tagging, people, peopleForm');
 
             // Handle initial route immediately
             Alpine.store('app').handleRoute();
@@ -876,9 +1013,6 @@
             console.log('🌍 TidyPhotos: Page loaded, Alpine available:', !!window.Alpine);
         });
     </script>
-
-    <!-- Load People Manager (self-contained x-data component) -->
-    <script type="module" src="/js/dist/people-manager.js"></script>
 
     <!-- Load Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -1017,12 +1151,12 @@
             </div>
 
             <!-- People View -->
-            <div x-show="$store.app.currentView === 'people'" class="people-view" x-data="peopleManager()" x-init="init()">
+            <div x-show="$store.app.currentView === 'people'" class="people-view">
                 <!-- People Management Section -->
                 <main class="people-main">
                     <div class="people-header">
                         <h2>People</h2>
-                        <button @click="showAddPersonModal = true" class="add-person-btn">
+                        <button @click="$store.peopleForm.openAddModal()" class="add-person-btn">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                 <path d="M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L19 7V9L17 9V11L19 11V13L21 13V11L23 11V9M16 4C16 6.21 14.21 8 12 8C9.79 8 8 6.21 8 4C8 1.79 9.79 0 12 0C14.21 0 16 1.79 16 4ZM4 7V10H1V12H4V15H6V12H9V10H6V7H4Z"/>
                             </svg>
@@ -1032,7 +1166,7 @@
 
                     <!-- People List -->
                     <div class="people-grid">
-                        <template x-for="person in people" :key="person.id">
+                        <template x-for="person in $store.people.all" :key="person.id">
                             <div class="person-card">
                                 <div class="person-avatar">
                                     <span x-text="person.name.charAt(0).toUpperCase()"></span>
@@ -1042,12 +1176,12 @@
                                     <span x-text="`${person.photoCount || 0} photos`"></span>
                                 </div>
                                 <div class="person-actions">
-                                    <button @click="editPerson(person)" class="icon-btn" title="Edit">
+                                    <button @click="$store.peopleForm.openEditModal(person)" class="icon-btn" title="Edit">
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                                         </svg>
                                     </button>
-                                    <button @click="deletePerson(person)" class="icon-btn delete-btn" title="Delete">
+                                    <button @click="$store.peopleForm.submitDelete(person)" class="icon-btn delete-btn" title="Delete">
                                         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                                             <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
                                         </svg>
@@ -1057,7 +1191,7 @@
                         </template>
 
                         <!-- Empty State -->
-                        <div x-show="people.length === 0" class="empty-state">
+                        <div x-show="$store.people.all.length === 0" class="empty-state">
                             <div class="empty-icon">
                                 <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
                                     <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
@@ -1065,7 +1199,7 @@
                             </div>
                             <h3>No people added yet</h3>
                             <p>Add people to organize photos by faces</p>
-                            <button @click="showAddPersonModal = true" class="add-person-empty-btn">
+                            <button @click="$store.peopleForm.openAddModal()" class="add-person-empty-btn">
                                 Add Your First Person
                             </button>
                         </div>
@@ -1073,29 +1207,29 @@
                 </main>
 
                 <!-- Add/Edit Person Modal (inside people-view scope) -->
-                <div x-show="showAddPersonModal || showEditPersonModal" class="modal-overlay" @click.self="closePersonModal()">
+                <div x-show="$store.peopleForm.showAddModal || $store.peopleForm.showEditModal" class="modal-overlay" @click.self="$store.peopleForm.closeModal()">
                     <div class="modal">
                         <div class="modal-header">
-                            <h3 x-text="showAddPersonModal ? 'Add Person' : 'Edit Person'"></h3>
-                            <button @click="closePersonModal()" class="close-btn">✕</button>
+                            <h3 x-text="$store.peopleForm.showAddModal ? 'Add Person' : 'Edit Person'"></h3>
+                            <button @click="$store.peopleForm.closeModal()" class="close-btn">✕</button>
                         </div>
                         <div class="modal-body">
-                            <form @submit.prevent="showAddPersonModal ? addPerson() : updatePerson()">
+                            <form @submit.prevent="$store.peopleForm.showAddModal ? $store.peopleForm.submitAdd() : $store.peopleForm.submitUpdate()">
                                 <div class="form-group">
                                     <label for="person-name">Name</label>
                                     <input
                                         type="text"
                                         id="person-name"
-                                        x-model="personForm.name"
+                                        x-model="$store.peopleForm.personForm.name"
                                         placeholder="Enter person's name"
                                         required>
                                 </div>
                                 <div class="form-actions">
-                                    <button type="button" @click="closePersonModal()" class="btn-secondary">
+                                    <button type="button" @click="$store.peopleForm.closeModal()" class="btn-secondary">
                                         Cancel
                                     </button>
                                     <button type="submit" class="btn-primary">
-                                        <span x-text="showAddPersonModal ? 'Add Person' : 'Update Person'"></span>
+                                        <span x-text="$store.peopleForm.showAddModal ? 'Add Person' : 'Update Person'"></span>
                                     </button>
                                 </div>
                             </form>
