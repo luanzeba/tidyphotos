@@ -8,6 +8,17 @@
 
     <script>
         console.log('🔧 TidyPhotos: Script loading...');
+
+        // Helper function to check if user is typing in an input field
+        // This prevents keyboard shortcuts from interfering with text input
+        window.isTypingInInput = function(event) {
+            const target = event.target;
+            const tagName = target.tagName.toLowerCase();
+            const isInput = tagName === 'input' || tagName === 'textarea';
+            const isContentEditable = target.isContentEditable;
+            return isInput || isContentEditable;
+        };
+
         document.addEventListener('alpine:init', () => {
             console.log('🏔️ Alpine.js: Initialized');
 
@@ -1098,12 +1109,12 @@
 
             <!-- Photo Grid -->
             <main class="photo-grid"
-                  @keydown.enter.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
-                  @keydown.space.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.viewer.open($store.app.selectedPhoto.id)"
-                  @keydown.arrow-right.window.prevent="!$store.viewer.isOpen && $store.photos.selectNext()"
-                  @keydown.arrow-left.window.prevent="!$store.viewer.isOpen && $store.photos.selectPrevious()"
-                  @keydown.escape.window="!$store.viewer.isOpen && ($store.app.selectedPhotoIndex = null)"
-                  @keydown.f.window.prevent="!$store.viewer.isOpen && $store.app.selectedPhoto && $store.photos.toggleFavorite($store.app.selectedPhoto.id)">
+                  @keydown.enter.window="!isTypingInInput($event) && !$store.viewer.isOpen && $store.app.selectedPhoto && ($event.preventDefault() || $store.viewer.open($store.app.selectedPhoto.id))"
+                  @keydown.space.window="!isTypingInInput($event) && !$store.viewer.isOpen && $store.app.selectedPhoto && ($event.preventDefault() || $store.viewer.open($store.app.selectedPhoto.id))"
+                  @keydown.arrow-right.window="!isTypingInInput($event) && !$store.viewer.isOpen && ($event.preventDefault() || $store.photos.selectNext())"
+                  @keydown.arrow-left.window="!isTypingInInput($event) && !$store.viewer.isOpen && ($event.preventDefault() || $store.photos.selectPrevious())"
+                  @keydown.escape.window="!isTypingInInput($event) && !$store.viewer.isOpen && ($store.app.selectedPhotoIndex = null)"
+                  @keydown.f.window="!isTypingInInput($event) && !$store.viewer.isOpen && $store.app.selectedPhoto && ($event.preventDefault() || $store.photos.toggleFavorite($store.app.selectedPhoto.id))">
             <template x-for="photo in $store.photos.filteredPhotos" :key="photo.id">
                 <div
                     class="photo-item"
@@ -1242,12 +1253,12 @@
         <!-- Full-Screen Photo Viewer -->
         <div x-show="$store.viewer.isOpen"
              class="photo-viewer-overlay"
-             @keydown.escape.window="$store.viewer.isOpen && ($store.viewer.taggingMode ? $store.viewer.toggleTaggingMode() : $store.viewer.close())"
-             @keydown.arrow-left.window="$store.viewer.isOpen && $store.viewer.previous()"
-             @keydown.arrow-right.window="$store.viewer.isOpen && $store.viewer.next()"
-             @keydown.q.window="$store.viewer.isOpen && $store.viewer.close()"
-             @keydown.f.window.prevent="$store.viewer.isOpen && $store.viewer.currentPhoto && $store.photos.toggleFavorite($store.viewer.currentPhoto.id)"
-             @keydown.t.window.prevent="$store.viewer.isOpen && $store.viewer.toggleTaggingMode()"
+             @keydown.escape.window="!isTypingInInput($event) && $store.viewer.isOpen && ($store.viewer.taggingMode ? $store.viewer.toggleTaggingMode() : $store.viewer.close())"
+             @keydown.arrow-left.window="!isTypingInInput($event) && $store.viewer.isOpen && ($event.preventDefault() || $store.viewer.previous())"
+             @keydown.arrow-right.window="!isTypingInInput($event) && $store.viewer.isOpen && ($event.preventDefault() || $store.viewer.next())"
+             @keydown.q.window="!isTypingInInput($event) && $store.viewer.isOpen && $store.viewer.close()"
+             @keydown.f.window="!isTypingInInput($event) && $store.viewer.isOpen && $store.viewer.currentPhoto && ($event.preventDefault() || $store.photos.toggleFavorite($store.viewer.currentPhoto.id))"
+             @keydown.t.window="!isTypingInInput($event) && $store.viewer.isOpen && ($event.preventDefault() || $store.viewer.toggleTaggingMode())"
              @click.self="$store.viewer.close()">
             <div class="photo-viewer-header">
                 <div class="photo-viewer-info">
