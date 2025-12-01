@@ -709,21 +709,25 @@
                     const photo = this.currentPhoto;
                     if (!photo?.name) return null;
 
+                    const payload = {
+                        photo_filename: photo.name,
+                        x: tag.x,
+                        y: tag.y,
+                        width: tag.width,
+                        height: tag.height,
+                        person_id: tag.personId || null,
+                        confidence: 1.0
+                    };
+
+                    console.log('🔍 DEBUG saveFaceTagToDatabase - Sending POST with payload:', payload);
+
                     try {
                         const response = await fetch('/api/face-tags', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({
-                                photo_filename: photo.name,
-                                x: tag.x,
-                                y: tag.y,
-                                width: tag.width,
-                                height: tag.height,
-                                person_id: tag.personId || null,
-                                confidence: 1.0
-                            })
+                            body: JSON.stringify(payload)
                         });
 
                         if (response.ok) {
@@ -809,15 +813,25 @@
                         return;
                     }
 
+                    const payload = {
+                        person_id: personId,
+                        x: tag.x,
+                        y: tag.y,
+                        width: tag.width,
+                        height: tag.height,
+                        confidence: tag.confidence || 1.0
+                    };
+
+                    console.log('🔍 DEBUG assignPersonToTag - Tag data before update:', tag);
+                    console.log('🔍 DEBUG assignPersonToTag - Sending PUT with payload:', payload);
+
                     try {
                         const response = await fetch(`/api/face-tags/${tagId}`, {
                             method: 'PUT',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({
-                                person_id: personId
-                            })
+                            body: JSON.stringify(payload)
                         });
 
                         if (response.ok) {
