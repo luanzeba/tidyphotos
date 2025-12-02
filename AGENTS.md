@@ -1,126 +1,124 @@
 # TidyPhotos - Agent Instructions
 
-This document provides essential context and instructions for AI coding assistants working on the TidyPhotos project.
-
-## Project Overview
-
-TidyPhotos is a self-hosted photo management application designed as an Apple Photos alternative. It features a Zig backend HTTP server, Alpine.js frontend, and focuses on minimal memory usage with on-demand photo discovery.
+Essential context for AI coding assistants working on TidyPhotos.
 
 ## Architecture
 
-- **Backend**: Zig HTTP server with manual request parsing
-- **Frontend**: Alpine.js with reactive state management
-- **Storage**: File system as source of truth, SQLite for metadata (planned)
-- **Photos**: On-demand discovery with zero memory storage
-- **Build**: Zig build system
+**Stack**: Go backend (`net/http` stdlib, no frameworks) + Alpine.js frontend (inline in HTML) + SQLite (`modernc.org/sqlite`, pure Go)
 
-## Key Technical Decisions
-
-1. **Memory Efficiency**: Photos are discovered on-demand, not pre-loaded into memory
-2. **Chunked File Serving**: Large images (2-3MB) are served in 8KB chunks to prevent connection issues
-3. **Performance Optimizations**: CSS Grid uses `contain: layout` and `will-change` for fast repositioning
-4. **Responsive Design**: Desktop sidebar (120px) + mobile bottom slider with backdrop blur
+**Core Principle**: Filesystem is source of truth. Database stores metadata and relationships only.
 
 ## File Structure
 
 ```
-tidyphotos/
-├── build.zig                 # Zig build configuration
-├── src/
-│   ├── main.zig             # HTTP server, routing, photo discovery
-│   └── import/
-│       └── photo_importer.zig # Photo scanning and metadata
-└── public/
-    ├── index.html           # Alpine.js application
-    ├── js/app.js           # Reactive state and methods
-    └── styles/main.css     # Responsive styling
+cmd/server/main.go          # HTTP server, routing, handlers (589 lines)
+cmd/regen-thumbs/main.go    # Thumbnail regeneration utility
+internal/db/db.go           # SQLite database layer, schema (323 lines)
+internal/importer/importer.go # Photo scanning, EXIF, thumbnails (311 lines)
+public/index.html           # Complete Alpine.js SPA (1435 lines)
+public/styles/main.css      # Styles (1113 lines)
 ```
 
-## Current Features
+## Key Technical Decisions (Critical!)
 
-- ✅ Photo gallery with thumbnail grid
-- ✅ Year/Month timeline filtering
-- ✅ Search functionality
-- ✅ Keyboard navigation (arrows, F for favorite, space for full-screen)
-- ✅ Full-screen photo viewer with navigation
-- ✅ Mobile responsive design
-- ✅ Favorite system
+1. **Face Tag Coordinates**: Stored as **percentages (0-100)**, NOT pixels. This is for responsive scaling.
+   - Example: `{x: 25.5, y: 30.2, width: 15.0, height: 20.0}` = 25.5% from left edge, etc.
 
-## Build & Run Commands
+2. **Favorites System**: Implemented as **symlinks** in `{PHOTOS_DIR}/favorites/` directory
+   - Filesystem → Database sync (filesystem is source of truth)
+   - PUT creates symlink + updates DB, DELETE removes both
+
+3. **SQLite Journal Mode**: **DELETE mode** (rollback journal), NOT WAL
+   - Set via `PRAGMA journal_mode=DELETE` on connection (internal/db/db.go:24-28)
+   - Prevents `.db-wal` and `.db-shm` files from appearing
+
+4. **Photo Import Flow**: Startup triggers scan → EXIF extract (exiftool) → Thumbnail gen (vips/sips) → DB insert
+   - Idempotent: Checks existing photos by filename before importing
+
+5. **Pure Go SQLite**: Uses `modernc.org/sqlite` (no CGo) for easy cross-compilation
+
+## Build & Run
 
 ```bash
-# Build the application
-zig build
+npm run dev              # Build + run server (recommended)
+go run cmd/server/main.go # Direct run (skip npm)
+npm run regen-thumbs     # Regenerate all thumbnails
 
-# Run the server
-./zig-out/bin/tidyphotos
-
-# Server runs on http://127.0.0.1:8080
+# Server: http://127.0.0.1:8080
+# Network: http://192.168.1.201:8080 (hardcoded in main.go)
 ```
 
 ## Development Guidelines
 
-### Zig Backend
-- Use manual HTTP request parsing (no external frameworks)
-- Implement chunked file serving for large images
-- Always handle errors gracefully with proper HTTP status codes
-- Use on-demand photo discovery, never store photos in memory
+### Backend (Go)
+
+**Security**:
+- Always use `isPathSafe()` before serving files (prevents directory traversal)
+
+**Database** (internal/db/db.go):
+- Use Unix timestamps: `time.Now().Unix()` (not datetime strings)
+- Nullable fields: `sql.NullString`, `sql.NullInt64`
+- EXIF metadata: JSON string in `metadata_json` column
+- Schema changes: No migration system yet, delete `photos.db` and restart for dev
+
+**Photo Import** (internal/importer/importer.go):
+- EXIF: `exiftool` CLI, parses JSON output
+- Thumbnails: Prefer `vips thumbnail` (fastest), fallback `sips + cwebp`
+- Formats: `.jpg`, `.jpeg`, `.png`, `.heic`, `.webp`
 
 ### Frontend (Alpine.js)
-- Keep reactive state minimal and focused
-- Use computed properties for derived data
-- Implement keyboard shortcuts for power users
-- Maintain responsive design for mobile/desktop
 
-### CSS Performance
-- Use `contain: layout` for grid optimizations
-- Avoid layout-affecting transitions on frequently changing elements
-- Use hardware acceleration (`will-change`) sparingly
-- Implement mobile-first responsive design
+**State Management**:
+- `app` store = single source of truth for `selectedPhotoIndex`
+- Other stores reference it via getters (e.g., `photos.filteredPhotos`)
+- Avoid duplicating state across stores
 
-### File Serving
-- Handle HEAD requests properly
-- Use appropriate MIME types
-- Implement proper error handling (404s)
-- Stream large files in chunks
+**Keyboard Shortcuts**:
+- **CRITICAL**: Check `event.target.tagName !== 'INPUT'` before handling shortcuts
+- Without this check, typing in search boxes triggers navigation
 
-## Common Issues & Solutions
+**API Calls**:
+- Use optimistic UI updates (update UI immediately, then call API)
+- Handle errors gracefully, revert optimistic changes on failure
 
-1. **BrokenPipe Errors**: Fixed with chunked file serving and proper HEAD request handling
-2. **Memory Concerns**: Use on-demand discovery instead of pre-loading photos
-3. **Slow Grid Repositioning**: Remove transitions that affect layout, use CSS containment
-4. **Mobile UI**: Use bottom slider with backdrop blur for timeline navigation
+### CSS
 
-## Testing
+**Performance**:
+- Use `contain: layout` on photo grid items for faster repaints
+- Lazy loading: `<img loading="lazy">`
+- Avoid transitions that affect layout (width, height)
 
-- Test photos should be placed in `test_photos/` directory
-- Server supports both `.jpg` and `.jpeg` extensions
-- Mock data is generated if no photos are found
+## Common Gotchas & Solutions
 
-## Future Features (Planned)
+1. **WAL Files Appearing** (`photos.db-wal`, `photos.db-shm`):
+   - Fix: Ensure `PRAGMA journal_mode=DELETE` set on connection (internal/db/db.go:24-28)
+   - SQLite journal mode persists in DB file, must be explicitly set
 
-- SQLite metadata storage
-- Thumbnail generation
-- Album management via symlinks
-- Facial recognition and tagging
-- Bulk photo operations
-- Advanced search and filtering
+2. **Keyboard Shortcuts Interfering with Input Fields**:
+   - Fix: Check `event.target.tagName !== 'INPUT'` before handling keyboard events
+   - Allows typing in search/modals without triggering navigation
 
-## Important Notes
+3. **Face Tag Coordinates Not Persisting**:
+   - Fix: Coordinates must be percentages (0-100), not pixels
+   - Send PUT to `/api/face-tags/{id}` with updated coordinates
 
-- The application prioritizes performance and memory efficiency
-- File system is the source of truth for photos
-- UI follows Apple-style design patterns
-- Mobile experience is equally important as desktop
-- All photos are served from `test_photos/` directory in development mode
+4. **Thumbnail Generation Failures**:
+   - Check if `vips` installed: `brew install vips`
+   - Fallback to `sips + cwebp` on macOS if vips unavailable
 
-## Quick Start for New Agents
+5. **Favorites Not Syncing**:
+   - Remember: Filesystem → Database (not bidirectional)
+   - Sync happens on startup via `internal/importer/importer.go`
 
-1. Run `zig build && ./zig-out/bin/tidyphotos` to start the server
-2. Access http://127.0.0.1:8080 in browser
-3. Place test images in `test_photos/` directory
-4. Use keyboard shortcuts: arrows (navigate), space (full-screen), F (favorite), escape (close)
+## Reference
 
-## Testing Real Photos
+- **API Routes**: See `cmd/server/main.go` (lines 40-130)
+- **Database Schema**: See `internal/db/db.go` initSchema() (lines 33-105)
+- **Alpine Stores**: See `public/index.html` <script> section
+- **Installation/Setup**: See README.md (if exists) or install: `brew install exiftool vips webp`
 
-The application can serve real photos from `/Users/vieira/Downloads/test_pictures` for testing purposes. The server automatically discovers and serves any `.jpg` or `.jpeg` files in the configured photos directory.
+## Current Feature Status
+
+**Implemented**: Photo gallery, timeline filtering, search, favorites (symlink-based), face tagging (manual), people management, keyboard nav, mobile responsive
+
+**Not Implemented**: Automatic face detection (ML deps installed but unused), albums (DB table exists, no UI), photo editing, bulk operations, video support
