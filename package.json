@@ -11,18 +11,10 @@
     "dev": "npm run build:frontend && go run cmd/server/main.go",
     "start": "./tidyphotos-server",
     "start:dev": "go run cmd/server/main.go",
-    "regen-thumbs": "go run cmd/regen-thumbs/main.go",
-    "test": "vitest",
-    "test:unit": "vitest --exclude tests/integration/",
-    "test:integration": "vitest tests/integration/",
-    "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "regen-thumbs": "go run cmd/regen-thumbs/main.go"
   },
   "devDependencies": {
-    "@vitest/ui": "^3.2.4",
-    "jsdom": "^27.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^3.2.4"
+    "typescript": "^5.0.0"
   },
   "keywords": [
     "photo-management",
